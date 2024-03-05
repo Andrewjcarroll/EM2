@@ -9,7 +9,7 @@
 #include <map>
 #include <stdexcept>
 
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
 #include <libxsmm.h>
 #endif
 
@@ -626,7 +626,7 @@ class CompactFiniteDiff {
     double m_kim_filt_kc = 0.88 * M_PI;
     double m_kim_filt_eps = 0.25;
 
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
     typedef libxsmm_mmfunction<double> kernel_type;
 
     kernel_type *m_kernel_x;

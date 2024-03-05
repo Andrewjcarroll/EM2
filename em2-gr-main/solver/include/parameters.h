@@ -75,10 +75,10 @@ extern dendro_cfd::BoundaryType SOLVER_DERIV_CLOSURE_TYPE;
 extern double SOLVER_KIM_FILTER_KC;
 extern double SOLVER_KIM_FILTER_EPS;
 
-extern double EM3_NOISE_AMPLITUDE;
+extern double EM2_NOISE_AMPLITUDE;
 
-extern double EM3_ID_AMP1;
-extern double EM3_ID_LAMBDA1;
+extern double EM2_ID_AMP1;
+extern double EM2_ID_LAMBDA1;
 
 extern double SOLVER_ETA_CONST;
 extern double SOLVER_ETA_R0;

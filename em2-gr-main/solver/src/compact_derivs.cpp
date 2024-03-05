@@ -5,12 +5,12 @@
 
 #include "mpi.h"
 
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
 #pragma message("Enabling the use of XSMM matrix multiplication!")
 #endif
 
 // #define FASTER_DERIV_CALC_VIA_MATRIX_MULT
-#ifdef EM3_DEBUG_COMPACT_DERIVS
+#ifdef EM2_DEBUG_COMPACT_DERIVS
 #pragma message("ENABLING COMPACT DERIVATIVE DEBUGGING INCLUDING PRINTING")
 #define PRINT_COMPACT_MATRICES
 #endif
@@ -108,7 +108,7 @@ void CompactFiniteDiff::initialize_cfd_storage() {
 }
 
 void CompactFiniteDiff::initialize_cfd_kernels() {
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
     // NOTE: first and second order derivatives can **share** the same kernel!
     // x deriv kernel
     m_kernel_x = new kernel_type(LIBXSMM_GEMM_FLAG_NONE, m_curr_dim_size,
@@ -151,7 +151,7 @@ void CompactFiniteDiff::initialize_cfd_kernels() {
 }
 
 void CompactFiniteDiff::delete_cfd_kernels() {
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
     delete m_kernel_x;
     delete m_kernel_y;
     delete m_kernel_z;
@@ -473,7 +473,7 @@ void CompactFiniteDiff::cfd_x(double *const Dxu, const double *const u,
     const unsigned int ny = sz[1];
     const unsigned int nz = sz[2];
 
-#ifdef EM3_DEBUG_COMPACT_DERIVS
+#ifdef EM2_DEBUG_COMPACT_DERIVS
     // the padding for this is stored in the cfd object
     const unsigned int xstart =
         (bflag & (1u << OCT_DIR_LEFT)) ? m_padding_size : 0;
@@ -519,7 +519,7 @@ void CompactFiniteDiff::cfd_x(double *const Dxu, const double *const u,
 
     int M = nx;
     int N = ny;
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
     const double alpha = 1.0 / dx;
 #else
     double alpha = 1.0 / dx;
@@ -556,7 +556,7 @@ void CompactFiniteDiff::cfd_x(double *const Dxu, const double *const u,
     // xmm(LIBXSMM_GEMM_FLAGS(TRANSA, TRANSB), M, N, K, LDA, LDB, LDC, alpha,
     // beta);
 
-#if EM3_DEBUG_COMPACT_DERIVS_OFF
+#if EM2_DEBUG_COMPACT_DERIVS_OFF
 
     if ((bflag & (1u << OCT_DIR_LEFT)) || (bflag & (1u << OCT_DIR_RIGHT))) {
         std::cout << "IN DERIV COMPUTATION FOR X, BFLAG IS: "
@@ -570,7 +570,7 @@ void CompactFiniteDiff::cfd_x(double *const Dxu, const double *const u,
 #endif
 
     for (unsigned int k = 0; k < nz; k++) {
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
         // N = ny;
         // thanks to memory layout, we can just... use this as a matrix
         // so we can just grab the "matrix" of ny x nx for this one
@@ -583,7 +583,7 @@ void CompactFiniteDiff::cfd_x(double *const Dxu, const double *const u,
 
 #else
 
-#ifdef EM3_DEBUG_COMPACT_DERIVS_OFF
+#ifdef EM2_DEBUG_COMPACT_DERIVS_OFF
 
         if ((bflag & (1u << OCT_DIR_LEFT)) || (bflag & (1u << OCT_DIR_RIGHT))) {
             std::cout << "here's the u_curr_chunk:" << std::endl;
@@ -604,13 +604,13 @@ void CompactFiniteDiff::cfd_x(double *const Dxu, const double *const u,
     }
 
     // TODO: investigate why the kernel won't take 1/dx as its alpha
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
     for (uint32_t ii = 0; ii < nx * ny * nz; ii++) {
         Dxu[ii] *= 1 / dx;
     }
 #endif
 
-#ifdef EM3_DEBUG_COMPACT_DERIVS
+#ifdef EM2_DEBUG_COMPACT_DERIVS
     // check for nans
     for (int k = zstart; k < zend; k++) {
         for (int j = ystart; j < yend; j++) {
@@ -663,7 +663,7 @@ void CompactFiniteDiff::cfd_y(double *const Dyu, const double *const u,
     const unsigned int ny = sz[1];
     const unsigned int nz = sz[2];
 
-#ifdef EM3_DEBUG_COMPACT_DERIVS
+#ifdef EM2_DEBUG_COMPACT_DERIVS
     const unsigned int xstart =
         (bflag & (1u << OCT_DIR_LEFT)) ? m_padding_size : 0;
     const unsigned int ystart =
@@ -720,7 +720,7 @@ void CompactFiniteDiff::cfd_y(double *const Dyu, const double *const u,
         R_mat_use = m_RMatrices[CompactDerivValueOrder::DERIV_LEFTRIGHT];
     }
 
-#if EM3_DEBUG_COMPACT_DERIVS_OFF
+#if EM2_DEBUG_COMPACT_DERIVS_OFF
 
     if ((bflag & (1u << OCT_DIR_DOWN)) || (bflag & (1u << OCT_DIR_UP))) {
         std::cout << "IN DERIV COMPUTATION FOR Y, BFLAG IS: "
@@ -734,7 +734,7 @@ void CompactFiniteDiff::cfd_y(double *const Dyu, const double *const u,
 #endif
 
     for (unsigned int k = 0; k < nz; k++) {
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
         // thanks to memory layout, we can just... use this as a matrix
         // so we can just grab the "matrix" of ny x nx for this one
 
@@ -742,7 +742,7 @@ void CompactFiniteDiff::cfd_y(double *const Dyu, const double *const u,
 
 #else
 
-#ifdef EM3_DEBUG_COMPACT_DERIVS_OFF
+#ifdef EM2_DEBUG_COMPACT_DERIVS_OFF
 
         if ((bflag & (1u << OCT_DIR_DOWN)) || (bflag & (1u << OCT_DIR_UP))) {
             std::cout << "here's the u_curr_chunk:" << std::endl;
@@ -776,13 +776,13 @@ void CompactFiniteDiff::cfd_y(double *const Dyu, const double *const u,
     }
 
     // NOTE: it is currently faster for these derivatives if we calculate them
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
     for (uint32_t ii = 0; ii < nx * ny * nz; ii++) {
         Dyu[ii] *= 1 / dy;
     }
 #endif
 
-#ifdef EM3_DEBUG_COMPACT_DERIVS
+#ifdef EM2_DEBUG_COMPACT_DERIVS
     // check for nans
     for (int k = zstart; k < zend; k++) {
         for (int j = ystart; j < yend; j++) {
@@ -835,7 +835,7 @@ void CompactFiniteDiff::cfd_z(double *const Dzu, const double *const u,
     const unsigned int ny = sz[1];
     const unsigned int nz = sz[2];
 
-#ifdef EM3_DEBUG_COMPACT_DERIVS
+#ifdef EM2_DEBUG_COMPACT_DERIVS
     const unsigned int xstart =
         (bflag & (1u << OCT_DIR_LEFT)) ? m_padding_size : 0;
     const unsigned int ystart =
@@ -888,7 +888,7 @@ void CompactFiniteDiff::cfd_z(double *const Dzu, const double *const u,
         R_mat_use = m_RMatrices[CompactDerivValueOrder::DERIV_LEFTRIGHT];
     }
 
-#if EM3_DEBUG_COMPACT_DERIVS_OFF
+#if EM2_DEBUG_COMPACT_DERIVS_OFF
 
     if ((bflag & (1u << OCT_DIR_BACK)) || (bflag & (1u << OCT_DIR_FRONT))) {
         std::cout << "IN DERIV COMPUTATION FOR Z, BFLAG IS: "
@@ -901,7 +901,7 @@ void CompactFiniteDiff::cfd_z(double *const Dzu, const double *const u,
 
 #endif
 
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
     int N = nx;
 #else
     int N = nx;
@@ -913,7 +913,7 @@ void CompactFiniteDiff::cfd_z(double *const Dzu, const double *const u,
             std::copy_n(&u[INDEX_3D(0, j, k)], nx, &m_u2d[INDEX_N2D(0, k, nx)]);
         }
 
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
         // now do the faster math multiplcation
         (*m_kernel_z)(R_mat_use, m_u2d, m_du2d);
 
@@ -927,7 +927,7 @@ void CompactFiniteDiff::cfd_z(double *const Dzu, const double *const u,
 
 #else
 
-#ifdef EM3_DEBUG_COMPACT_DERIVS_OFF
+#ifdef EM2_DEBUG_COMPACT_DERIVS_OFF
 
         if ((bflag & (1u << OCT_DIR_DOWN)) || (bflag & (1u << OCT_DIR_UP))) {
             std::cout << "here's the u_curr_chunk:" << std::endl;
@@ -942,7 +942,7 @@ void CompactFiniteDiff::cfd_z(double *const Dzu, const double *const u,
         dgemm_(&TRANSA, &TRANSB, &M, &N, &K, &alpha, R_mat_use, &M, m_u2d, &K,
                &beta, m_du2d, &M);
 
-#ifdef EM3_DEBUG_COMPACT_DERIVS_OFF
+#ifdef EM2_DEBUG_COMPACT_DERIVS_OFF
 
         if ((bflag & (1u << OCT_DIR_DOWN)) || (bflag & (1u << OCT_DIR_UP))) {
             std::cout << "here's the m_du2d:" << std::endl;
@@ -963,13 +963,13 @@ void CompactFiniteDiff::cfd_z(double *const Dzu, const double *const u,
     }
 
     // NOTE: it is currently faster for these derivatives if we calculate them
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
     for (uint32_t ii = 0; ii < nx * ny * nz; ii++) {
         Dzu[ii] *= 1 / dz;
     }
 #endif
 
-#ifdef EM3_DEBUG_COMPACT_DERIVS
+#ifdef EM2_DEBUG_COMPACT_DERIVS
     // check for nans
     for (int k = zstart; k < zend; k++) {
         for (int j = ystart; j < yend; j++) {
@@ -1029,7 +1029,7 @@ void CompactFiniteDiff::cfd_xx(double *const Dxu, const double *const u,
 
     int M = nx;
     int N = ny;
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
     const double alpha = 1.0 / (dx * dx);
 #else
     double alpha = 1.0 / (dx * dx);
@@ -1068,7 +1068,7 @@ void CompactFiniteDiff::cfd_xx(double *const Dxu, const double *const u,
     // beta);
 
     for (unsigned int k = 0; k < nz; k++) {
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
         // N = ny;
         // thanks to memory layout, we can just... use this as a matrix
         // so we can just grab the "matrix" of ny x nx for this one
@@ -1091,7 +1091,7 @@ void CompactFiniteDiff::cfd_xx(double *const Dxu, const double *const u,
     }
 
     // TODO: investigate why the kernel won't take 1/dx as its alpha
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
     for (uint32_t ii = 0; ii < nx * ny * nz; ii++) {
         Dxu[ii] *= alpha;
     }
@@ -1152,7 +1152,7 @@ void CompactFiniteDiff::cfd_yy(double *const Dyu, const double *const u,
     }
 
     for (unsigned int k = 0; k < nz; k++) {
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
         // thanks to memory layout, we can just... use this as a matrix
         // so we can just grab the "matrix" of ny x nx for this one
 
@@ -1183,7 +1183,7 @@ void CompactFiniteDiff::cfd_yy(double *const Dyu, const double *const u,
     }
 
     // NOTE: it is currently faster for these derivatives if we calculate them
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
     for (uint32_t ii = 0; ii < nx * ny * nz; ii++) {
         Dyu[ii] *= alpha;
     }
@@ -1235,7 +1235,7 @@ void CompactFiniteDiff::cfd_zz(double *const Dzu, const double *const u,
         printf("Uh oh, DERIV_2ND_LEFTRIGHT was reached!");
     }
 
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
     int N = nx;
 #else
     int N = nx;
@@ -1246,7 +1246,7 @@ void CompactFiniteDiff::cfd_zz(double *const Dzu, const double *const u,
             // copy slice of X values over
             std::copy_n(&u[INDEX_3D(0, j, k)], nx, &m_u2d[INDEX_N2D(0, k, nx)]);
         }
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
 
         // now do the faster math multiplcation
         (*m_kernel_z)(R_mat_use, m_u2d, m_du2d);
@@ -1275,7 +1275,7 @@ void CompactFiniteDiff::cfd_zz(double *const Dzu, const double *const u,
     }
 
     // NOTE: it is currently faster for these derivatives if we calculate them
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
     for (uint32_t ii = 0; ii < nx * ny * nz; ii++) {
         Dzu[ii] *= alpha;
     }
@@ -1351,7 +1351,7 @@ void CompactFiniteDiff::filter_cfd_x(double *const u, double *const filtx_work,
     }
 
     for (unsigned int k = 0; k < nx; k++) {
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
         // thanks to memory layout, we can just... use this as a matrix
         // so we can just grab the "matrix" of ny x nx for this one
 
@@ -1421,7 +1421,7 @@ void CompactFiniteDiff::filter_cfd_y(double *const u, double *const filty_work,
             }
         }
 
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
         // thanks to memory layout, we can just... use this as a matrix
         // so we can just grab the "matrix" of ny x nx for this one
 
@@ -1477,7 +1477,7 @@ void CompactFiniteDiff::filter_cfd_z(double *const u, double *const filtz_work,
         RF_mat_use = m_RMatrices[CompactDerivValueOrder::FILT_LEFTRIGHT];
     }
 
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
     int N = nx;
 #else
     int N = nx;
@@ -1500,7 +1500,7 @@ void CompactFiniteDiff::filter_cfd_z(double *const u, double *const filtz_work,
             }
         }
 
-#ifdef EM3_USE_XSMM_MAT_MUL
+#ifdef EM2_USE_XSMM_MAT_MUL
 
         // now do the faster math multiplcation
         (*m_kernel_z_filt)(RF_mat_use, m_u2d, m_du2d);

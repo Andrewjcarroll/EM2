@@ -31,7 +31,7 @@ void initDataFuncToPhysCoords(const double xx1, const double yy1,
     switch (dsolve::SOLVER_ID_TYPE) {
         case 0:
 
-            initDataEM3(xx, yy, zz, var);
+            initDataEM2(xx, yy, zz, var);
             break;
 
         default:
@@ -42,40 +42,47 @@ void initDataFuncToPhysCoords(const double xx1, const double yy1,
     }
 }
 
-void initDataEM3(const double x, const double y, const double z, double *var) {
-    // NOTE: remember that x, y, and z are already CONVERTED from grid!
-    const double amp1 = dsolve::EM3_ID_AMP1;
-    const double lambda1 = dsolve::EM3_ID_LAMBDA1;
+void initDataEM2(const double x,const double y,const double z, double *var)
+    {
 
-    double B0, B1, B2, E0, E1, E2;
-    double rho_e, J0, J1, J2;
-    double r, Ephi_over_r, tmp_Ephiup;
+        const double amp1 = dsolve::EM2_ID_AMP1;
+        const double lambda1 = dsolve::EM2_ID_LAMBDA1;
 
-    r = sqrt(x * x + y * y + z * z);
+        double psi, A0,A1,A2, Gamma, E0,E1,E2; 
+        double rho_e, J0,J1,J2;
+        double r_sq,tmp_Ephiup ; 
 
-    tmp_Ephiup = -8.0 * amp1 * lambda1 * lambda1 * exp(-lambda1 * r * r);
+        r_sq = x*x + y*y + z*z ; 
+        tmp_Ephiup = - 8.0*amp1*lambda1*lambda1*exp(-lambda1*r_sq) ; 
+        E0 = - y * tmp_Ephiup ; 
+        E1 =   x * tmp_Ephiup ; 
+        E2 = 0.0 ; 
+ 
+        Gamma = 0.0 ; 
 
-    E0 = -y * tmp_Ephiup;
-    E1 = x * tmp_Ephiup;
-    E2 = 0.0;
+        A0 = 0.0 ;  
+        A1 = 0.0 ;  
+        A2 = 0.0 ;  
+        
+        psi = 0.0 ;  
+        
+        J0 = 0.0 ;  
+        J1 = 0.0 ;  
+        J2 = 0.0 ;  
+        
+        rho_e = 0.0 ;  
+        
+        var[VAR::U_PSI] = psi;
+        var[VAR::U_E0] = E0;
+        var[VAR::U_E1] = E1;
+        var[VAR::U_E2] = E2;
+        var[VAR::U_A0] = A0;
+        var[VAR::U_A1] = A1;
+        var[VAR::U_A2] = A2;
+        var[VAR::U_GAMMA] = Gamma;
 
-    B0 = 0.0;
-    B1 = 0.0;
-    B2 = 0.0;
+    }
 
-    J0 = 0.0;
-    J1 = 0.0;
-    J2 = 0.0;
-
-    rho_e = 0.0;
-
-    var[VAR::U_E0] = E0;
-    var[VAR::U_E1] = E1;
-    var[VAR::U_E2] = E2;
-    var[VAR::U_B0] = B0;
-    var[VAR::U_B1] = B1;
-    var[VAR::U_B2] = B2;
-}
 
 double CalTolHelper(const double t, const double r, const double rad[],
                     const double eps[], const double toffset) {
@@ -99,7 +106,7 @@ double CalTolHelper(const double t, const double r, const double rad[],
     }
 }
 
-void analyticalSolEM3_BLOCK(double **uZipAnalyticVars,
+void analyticalSolEM2_BLOCK(double **uZipAnalyticVars,
                             double **uZipAnalyticDiffVars,
                             const double **uZipVars, const double time,
                             const unsigned int &offset, const double *pmin,
@@ -121,25 +128,33 @@ void analyticalSolEM3_BLOCK(double **uZipAnalyticVars,
     const double *E0 = &uZipVars[VAR::U_E0][offset];
     const double *E1 = &uZipVars[VAR::U_E1][offset];
     const double *E2 = &uZipVars[VAR::U_E2][offset];
-    const double *B0 = &uZipVars[VAR::U_B0][offset];
-    const double *B1 = &uZipVars[VAR::U_B1][offset];
-    const double *B2 = &uZipVars[VAR::U_B2][offset];
+    const double *A0 = &uZipVars[VAR::U_A0][offset];
+    const double *A1 = &uZipVars[VAR::U_A1][offset];
+    const double *A2 = &uZipVars[VAR::U_A2][offset];
+    const double *psi = &uZipVars[VAR::U_PSI][offset];
+    const double *Gamma= &uZipVars[VAR::U_GAMMA][offset];
+    
+    
 
     // the analytic variables
     double *E0_a = &uZipAnalyticVars[VAR::U_E0][offset];
     double *E1_a = &uZipAnalyticVars[VAR::U_E1][offset];
     double *E2_a = &uZipAnalyticVars[VAR::U_E2][offset];
-    double *B0_a = &uZipAnalyticVars[VAR::U_B0][offset];
-    double *B1_a = &uZipAnalyticVars[VAR::U_B1][offset];
-    double *B2_a = &uZipAnalyticVars[VAR::U_B2][offset];
+    double *A0_a = &uZipAnalyticVars[VAR::U_A0][offset];
+    double *A1_a = &uZipAnalyticVars[VAR::U_A1][offset];
+    double *A2_a = &uZipAnalyticVars[VAR::U_A2][offset];
+    double *psi_a = &uZipAnalyticVars[VAR::U_PSI][offset];
+    double *Gamma_a = &uZipAnalyticVars[VAR::U_GAMMA][offset];
 
     // the analytic difference variables
     double *E0_adiff = &uZipAnalyticDiffVars[VAR::U_E0][offset];
     double *E1_adiff = &uZipAnalyticDiffVars[VAR::U_E1][offset];
     double *E2_adiff = &uZipAnalyticDiffVars[VAR::U_E2][offset];
-    double *B0_adiff = &uZipAnalyticDiffVars[VAR::U_B0][offset];
-    double *B1_adiff = &uZipAnalyticDiffVars[VAR::U_B1][offset];
-    double *B2_adiff = &uZipAnalyticDiffVars[VAR::U_B2][offset];
+    double *A0_adiff = &uZipAnalyticDiffVars[VAR::U_A0][offset];
+    double *A1_adiff = &uZipAnalyticDiffVars[VAR::U_A1][offset];
+    double *A2_adiff = &uZipAnalyticDiffVars[VAR::U_A2][offset];
+    double *psi_adiff = &uZipAnalyticDiffVars[VAR::U_PSI][offset];
+    double *Gamma_adiff = &uZipAnalyticDiffVars[VAR::U_GAMMA][offset];
 
     // then loop through
     double varinput[dsolve::SOLVER_NUM_VARS];
@@ -158,24 +173,28 @@ void analyticalSolEM3_BLOCK(double **uZipAnalyticVars,
                 const double z = pmin[2] + k * hz;
                 const unsigned int pp = i + nx * (j + ny * k);
 
-                analyticalSolEM3(x, y, z, time, varinput, false);
+                analyticalSolEM2(x, y, z, time, varinput, false);
 
                 // extract out the values
                 E0_a[pp] = varinput[VAR::U_E0];
                 E1_a[pp] = varinput[VAR::U_E1];
                 E2_a[pp] = varinput[VAR::U_E2];
-                B0_a[pp] = varinput[VAR::U_B0];
-                B1_a[pp] = varinput[VAR::U_B1];
-                B2_a[pp] = varinput[VAR::U_B2];
+                A0_a[pp] = varinput[VAR::U_A0];
+                A1_a[pp] = varinput[VAR::U_A1];
+                A2_a[pp] = varinput[VAR::U_A2];
+                psi_a[pp] = varinput[VAR::U_PSI];
+                Gamma_a[pp] = varinput[VAR::U_GAMMA];
 
                 // calculate the difference
                 E0_adiff[pp] = E0_a[pp] - E0[pp];
                 E1_adiff[pp] = E1_a[pp] - E1[pp];
                 E2_adiff[pp] = E2_a[pp] - E2[pp];
 
-                B0_adiff[pp] = B0_a[pp] - B0[pp];
-                B1_adiff[pp] = B1_a[pp] - B1[pp];
-                B2_adiff[pp] = B2_a[pp] - B2[pp];
+                A0_adiff[pp] = A0_a[pp] - A0[pp];
+                A1_adiff[pp] = A1_a[pp] - A1[pp];
+                A2_adiff[pp] = A2_a[pp] - A2[pp];
+                psi_adiff[pp] = psi_a[pp] - psi[pp];
+                Gamma_adiff[pp] = Gamma_a[pp] - Gamma[pp];
             }
         }
     }
@@ -183,7 +202,7 @@ void analyticalSolEM3_BLOCK(double **uZipAnalyticVars,
 }
 
 // added analytic calculation for the dipole pulse -AJC
-void analyticalSolEM3(const double xx, const double yy, const double zz,
+void analyticalSolEM2(const double xx, const double yy, const double zz,
                       const double t, double *var, bool varsAreGrid) {
     double x, y, z;
     if (varsAreGrid) {
@@ -195,78 +214,63 @@ void analyticalSolEM3(const double xx, const double yy, const double zz,
         y = yy;
         z = zz;
     }
+const double amp1 = dsolve::EM2_ID_AMP1;
+        const double lambda1 = dsolve::EM2_ID_LAMBDA1;
 
-    const double amp1 = dsolve::EM3_ID_AMP1;
-    const double lambda1 = dsolve::EM3_ID_LAMBDA1;
+        double psi, A0,A1,A2, Gamma, E0,E1,E2;
+        double rho_e, J0,J1,J2;
+        double r,tmp_Ephiup, tmp_Aphiup ;
 
-    double B0, B1, B2, E0, E1, E2;
-    double rho_e, J0, J1, J2;
-    double r, tmp_Ephiup, tmp_Br_up, tmp_Btheta_up;
+        r = sqrt( x*x + y*y + z*z ) ;
+        if ( r < 1.e-8 ) { r=1.e-8 ; }
 
-    r = sqrt(x * x + y * y + z * z);
-    if (r < 1.e-8) {
-        r = 1.e-8;
+
+        tmp_Aphiup =   amp1 * (   exp( - lambda1*(t-r)*(t-r) )
+                                - exp( - lambda1*(t+r)*(t+r) ) ) / (r*r)
+                     - 2.0*amp1*lambda1
+                          * (   (t-r)*exp( - lambda1*(t-r)*(t-r) )
+                              + (t+r)*exp( - lambda1*(t+r)*(t+r) ) ) / r
+                   ;
+
+
+        tmp_Ephiup = + 2.0*amp1*lambda1
+                          * (   (t-r)*exp( - lambda1*(t-r)*(t-r) )
+                              - (t+r)*exp( - lambda1*(t+r)*(t+r) ) ) / (r*r)
+                     + 2.0*amp1*lambda1
+                          * (   exp( - lambda1*(t-r)*(t-r) )
+                              + exp( - lambda1*(t+r)*(t+r) ) ) / r
+                     - 4.0*amp1*lambda1*lambda1
+                          * (   (t-r)*(t-r)*exp( - lambda1*(t-r)*(t-r) )
+                              + (t+r)*(t+r)*exp( - lambda1*(t+r)*(t+r) ) ) / r
+                   ;
+
+        E0 = - y * tmp_Ephiup / r ;
+        E1 =   x * tmp_Ephiup / r ;
+        E2 = 0.0 ;
+
+        A0 = - y * tmp_Aphiup / r ;
+        A1 =   x * tmp_Aphiup / r ;
+        A2 = 0.0 ;
+
+        Gamma = 0.0 ;
+    
+        J0 = 0.0 ;
+        J1 = 0.0 ;
+        J2 = 0.0 ;
+
+        psi = 0.0 ;
+
+
+        var[VAR::U_PSI] = psi ;
+        var[VAR::U_E0] = E0 ;
+        var[VAR::U_E1] = E1 ;
+        var[VAR::U_E2] = E2 ;
+        var[VAR::U_A0] = A0 ;
+        var[VAR::U_A1] = A1 ;
+        var[VAR::U_A2] = A2 ;
+        var[VAR::U_GAMMA] = Gamma;
+
     }
-
-    tmp_Br_up = -2.0 * lambda1 *
-                    ((t - r) * exp(-lambda1 * (t - r) * (t - r)) +
-                     (t + r) * exp(-lambda1 * (t + r) * (t + r))) /
-                    (r * r) +
-                (exp(-lambda1 * (t - r) * (t - r)) -
-                 exp(-lambda1 * (t + r) * (t + r))) /
-                    (r * r * r);
-    tmp_Br_up *= 2.0 * amp1;
-
-    tmp_Btheta_up =
-        -2.0 * lambda1 *
-            (exp(-lambda1 * (t - r) * (t - r)) -
-             exp(-lambda1 * (t + r) * (t + r))) /
-            r +
-        4.0 * lambda1 * lambda1 *
-            ((t - r) * (t - r) * exp(-lambda1 * (t - r) * (t - r)) -
-             (t + r) * (t + r) * exp(-lambda1 * (t + r) * (t + r))) /
-            r -
-        2.0 * lambda1 *
-            ((t - r) * exp(-lambda1 * (t - r) * (t - r)) +
-             (t + r) * exp(-lambda1 * (t + r) * (t + r))) /
-            (r * r) +
-        (exp(-lambda1 * (t - r) * (t - r)) -
-         exp(-lambda1 * (t + r) * (t + r))) /
-            (r * r * r);
-    tmp_Btheta_up *= amp1;
-
-    tmp_Ephiup = 2.0 * amp1 * lambda1 *
-                     ((t - r) * exp(-lambda1 * (t - r) * (t - r)) -
-                      (t + r) * exp(-lambda1 * (t + r) * (t + r))) /
-                     (r * r) +
-                 2.0 * amp1 * lambda1 *
-                     (exp(-lambda1 * (t - r) * (t - r)) +
-                      exp(-lambda1 * (t + r) * (t + r))) /
-                     r -
-                 4.0 * amp1 * lambda1 * lambda1 *
-                     ((t - r) * (t - r) * exp(-lambda1 * (t - r) * (t - r)) +
-                      (t + r) * (t + r) * exp(-lambda1 * (t + r) * (t + r))) /
-                     r;
-
-    E0 = -y * tmp_Ephiup / r;
-    E1 = x * tmp_Ephiup / r;
-    E2 = 0.0;
-
-    B0 = x * z * (tmp_Br_up + tmp_Btheta_up) / (r * r);
-    B1 = y * z * (tmp_Br_up + tmp_Btheta_up) / (r * r);
-    B2 = (z * z * tmp_Br_up - (x * x + y * y) * tmp_Btheta_up) / (r * r);
-
-    J0 = 0.0;
-    J1 = 0.0;
-    J2 = 0.0;
-
-    var[VAR::U_E0] = E0;
-    var[VAR::U_E1] = E1;
-    var[VAR::U_E2] = E2;
-    var[VAR::U_B0] = B0;
-    var[VAR::U_B1] = B1;
-    var[VAR::U_B2] = B2;
-}
 
 void blockAdaptiveOctree(std::vector<ot::TreeNode> &tmpNodes,
                          const Point &pt_min, const Point &pt_max,

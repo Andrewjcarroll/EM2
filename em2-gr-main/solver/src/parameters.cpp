@@ -46,9 +46,9 @@ unsigned int SOLVER_FILTER_FREQ = 10;
 double SOLVER_KIM_FILTER_KC = 0.88 * M_PI;
 double SOLVER_KIM_FILTER_EPS = 0.25;
 
-double EM3_NOISE_AMPLITUDE = 0.0;
-double EM3_ID_AMP1 = 5.0;
-double EM3_ID_LAMBDA1 = 0.05;
+double EM2_NOISE_AMPLITUDE = 0.0;
+double EM2_ID_AMP1 = 5.0;
+double EM2_ID_LAMBDA1 = 0.05;
 
 double SOLVER_ETA_CONST = 2.0;
 double SOLVER_ETA_DAMPING_EXP = 2.0;
@@ -148,16 +148,16 @@ void readParamFile(const char* inFile, MPI_Comm comm) {
     int temp_SOLVER_DERIV_CLOSURE_TYPE = (int)dsolve::SOLVER_DERIV_CLOSURE_TYPE;
 
     if (!rank) {
-        if (file.contains("dsolve::EM3_NOISE_AMPLITUDE")) {
-            dsolve::EM3_NOISE_AMPLITUDE =
-                file["dsolve::EM3_NOISE_AMPLITUDE"].as_floating();
+        if (file.contains("dsolve::EM2_NOISE_AMPLITUDE")) {
+            dsolve::EM2_NOISE_AMPLITUDE =
+                file["dsolve::EM2_NOISE_AMPLITUDE"].as_floating();
         }
-        if (file.contains("dsolve::EM3_ID_AMP1")) {
-            dsolve::EM3_ID_AMP1 = file["dsolve::EM3_ID_AMP1"].as_floating();
+        if (file.contains("dsolve::EM2_ID_AMP1")) {
+            dsolve::EM2_ID_AMP1 = file["dsolve::EM2_ID_AMP1"].as_floating();
         }
-        if (file.contains("dsolve::EM3_ID_LAMBDA1")) {
-            dsolve::EM3_ID_LAMBDA1 =
-                file["dsolve::EM3_ID_LAMBDA1"].as_floating();
+        if (file.contains("dsolve::EM2_ID_LAMBDA1")) {
+            dsolve::EM2_ID_LAMBDA1 =
+                file["dsolve::EM2_ID_LAMBDA1"].as_floating();
         }
         if (file.contains("dsolve::SOLVER_ETA_CONST")) {
             dsolve::SOLVER_ETA_CONST =
@@ -739,9 +739,9 @@ void readParamFile(const char* inFile, MPI_Comm comm) {
         dsolve::SOLVER_OCTREE_MAX[2] = (double)(1u << dsolve::SOLVER_MAXDEPTH);
     }
 
-    par::Mpi_Bcast(&(dsolve::EM3_ID_AMP1), 1, 0, comm);
-    par::Mpi_Bcast(&(dsolve::EM3_ID_LAMBDA1), 1, 0, comm);
-    par::Mpi_Bcast(&(dsolve::EM3_NOISE_AMPLITUDE), 1, 0, comm);
+    par::Mpi_Bcast(&(dsolve::EM2_ID_AMP1), 1, 0, comm);
+    par::Mpi_Bcast(&(dsolve::EM2_ID_LAMBDA1), 1, 0, comm);
+    par::Mpi_Bcast(&(dsolve::EM2_NOISE_AMPLITUDE), 1, 0, comm);
 
     par::Mpi_Bcast(&(dsolve::SOLVER_PROFILE_OUTPUT_FREQ), 1, 0, comm);
 
@@ -906,10 +906,10 @@ void dumpParamFile(std::ostream& sout, int root, MPI_Comm comm) {
         sout << "\tdsolve::DENDRO_VERSION: " << dsolve::DENDRO_VERSION
              << std::endl;
 
-        sout << "\tdsolve::EM3_NOISE_AMPLITUDE: " << dsolve::EM3_NOISE_AMPLITUDE
+        sout << "\tdsolve::EM2_NOISE_AMPLITUDE: " << dsolve::EM2_NOISE_AMPLITUDE
              << std::endl;
-        sout << "\tdsolve::EM3_ID_AMP1: " << dsolve::EM3_ID_AMP1 << std::endl;
-        sout << "\tdsolve::EM3_ID_LAMBDA1: " << dsolve::EM3_ID_LAMBDA1
+        sout << "\tdsolve::EM2_ID_AMP1: " << dsolve::EM2_ID_AMP1 << std::endl;
+        sout << "\tdsolve::EM2_ID_LAMBDA1: " << dsolve::EM2_ID_LAMBDA1
              << std::endl;
 
         // NOTE: the enum starts at -1, so we add one for the array

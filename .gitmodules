@@ -1,0 +1,9 @@
+[submodule "em2-gr-main/build/dendrolib"]
+	path = em2-gr-main/build/dendrolib
+	url = https://github.com/paralab/dendro-5.01
+[submodule "em2-gr-main/dendrolib"]
+	path = em2-gr-main/dendrolib
+	url = https://github.com/paralab/dendro-5.01
+[submodule "em2-gr-main/lib/toml11"]
+	path = em2-gr-main/lib/toml11
+	url = https://github.com/ToruNiina/toml11.git

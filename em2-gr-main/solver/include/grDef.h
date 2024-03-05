@@ -62,13 +62,15 @@ enum VAR {
     U_E0 = 0,
     U_E1,
     U_E2,
-    U_B0,
-    U_B1,
-    U_B2,
+    U_A0,
+    U_A1,
+    U_A2,
+    U_PSI,
+    U_GAMMA
 };
 enum VAR_CONSTRAINT {
     C_DIVE = 0,
-    C_DIVB,
+    C_DIVA 
 };
 //[[[end]]]
 
@@ -84,21 +86,21 @@ cog.outl(dendroconf.dendroConfigs.gen_enum_iterable_list("constraint", enum_name
 // clang-format on
 static const char *SOLVER_VAR_NAMES[] = {
 
-    "U_E0", "U_E1", "U_E2", "U_B0", "U_B1", "U_B2",
+    "U_E0", "U_E1", "U_E2", "U_A0", "U_A1", "U_A2", "U_PSI", "U_GAMMA"
 };
 
 static const char *SOLVER_VAR_CONSTRAINT_NAMES[] = {
     "C_DIVE",
-    "C_DIVB",
+    "C_DIVA",
 };
 
 static const VAR SOLVER_VAR_ITERABLE_LIST[] = {
-    U_E0, U_E1, U_E2, U_B0, U_B1, U_B2,
+    U_E0, U_E1, U_E2, U_A0, U_A1, U_A2, U_PSI, U_GAMMA
 };
 
 static const VAR_CONSTRAINT SOLVER_VAR_CONSTRAINT_ITERABLE_LIST[] = {
     C_DIVE,
-    C_DIVB,
+    C_DIVA,
 };
 
 //[[[end]]]

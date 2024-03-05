@@ -89,18 +89,20 @@ void physical_constraints(double **uZipConVars, const double **uZipVars,
     ]]]*/
     // clang-format on
 
-    // ADDED PHYSCON FROM EM3 CODE -AJC
+    // ADDED PHYSCON FROM EM2 CODE -AJC
     double *divE = &uZipConVars[VAR_CONSTRAINT::C_DIVE][offset];
-    double *divB = &uZipConVars[VAR_CONSTRAINT::C_DIVB][offset];
+    double *divA = &uZipConVars[VAR_CONSTRAINT::C_DIVA][offset];
 
     const double *E0 = &uZipVars[VAR::U_E0][offset];
     const double *E1 = &uZipVars[VAR::U_E1][offset];
     const double *E2 = &uZipVars[VAR::U_E2][offset];
 
-    const double *B0 = &uZipVars[VAR::U_B0][offset];
-    const double *B1 = &uZipVars[VAR::U_B1][offset];
-    const double *B2 = &uZipVars[VAR::U_B2][offset];
-    //[[[end]]]
+    const double *A0 = &uZipVars[VAR::U_A0][offset];
+    const double *A1 = &uZipVars[VAR::U_A1][offset];
+    const double *A2 = &uZipVars[VAR::U_A2][offset];
+    const double *psi = &uZipVars[VAR::U_PSI][offset];
+    const double *Gamma = &uZipVars[VAR::U_GAMMA][offset];
+    //[[[end]
 
     const unsigned int PW = dsolve::SOLVER_PADDING_WIDTH;
 
@@ -313,30 +315,37 @@ void physical_constraints_compact_derivs(double **uZipConVars,
     ]]]*/
     // clang-format on
 
-    // ADDED PHYSCON FROM EM3 CODE -AJC
-    double *divE = &uZipConVars[VAR_CONSTRAINT::C_DIVE][offset];
-    double *divB = &uZipConVars[VAR_CONSTRAINT::C_DIVB][offset];
+    // ADDED PHYSCON FROM EM2 CODE -AJC
+  double *divA = &uZipConVars[VAR_CONSTRAINT::C_DIVA][offset];
+  double *divE = &uZipConVars[VAR_CONSTRAINT::C_DIVE][offset];
 
-    double *E0 = &uZipVars[VAR::U_E0][offset];
-    double *E1 = &uZipVars[VAR::U_E1][offset];
-    double *E2 = &uZipVars[VAR::U_E2][offset];
+  const double *A0 = &uZipVars[VAR::U_A0][offset];
+  const double *A1 = &uZipVars[VAR::U_A1][offset];
+  const double *A2 = &uZipVars[VAR::U_A2][offset];
+  
+  const double *E0 = &uZipVars[VAR::U_E0][offset];
+  const double *E1 = &uZipVars[VAR::U_E1][offset];
+  const double *E2 = &uZipVars[VAR::U_E2][offset];
 
-    double *B0 = &uZipVars[VAR::U_B0][offset];
-    double *B1 = &uZipVars[VAR::U_B1][offset];
-    double *B2 = &uZipVars[VAR::U_B2][offset];
+  const double *psi = &uZipVars[VAR::U_PSI][offset];
+  const double *Gamma = &uZipVars[VAR::U_GAMMA][offset];
+
     //[[[end]]]
 
     const unsigned int PW = dsolve::SOLVER_PADDING_WIDTH;
 
-    if (bflag != 0) {
-        cfd.clear_boundary_padding_nans(E0, sz, bflag);
-        cfd.clear_boundary_padding_nans(E1, sz, bflag);
-        cfd.clear_boundary_padding_nans(E2, sz, bflag);
+//TO DO FIX THIS 
+    // if (bflag != 0) {
+    //     cfd.clear_boundary_padding_nans(E0, sz, bflag);
+    //     cfd.clear_boundary_padding_nans(E1, sz, bflag);
+    //     cfd.clear_boundary_padding_nans(E2, sz, bflag);
 
-        cfd.clear_boundary_padding_nans(B0, sz, bflag);
-        cfd.clear_boundary_padding_nans(B1, sz, bflag);
-        cfd.clear_boundary_padding_nans(B2, sz, bflag);
-    }
+    //     cfd.clear_boundary_padding_nans(A0, sz, bflag);
+    //     cfd.clear_boundary_padding_nans(A1, sz, bflag);
+    //     cfd.clear_boundary_padding_nans(A2, sz, bflag);
+    //     cfd.clear_boundary_padding_nans(psi, sz, bflag);
+    //     cfd.clear_boundary_padding_nans(Gamma, sz, bflag);
+    // }
 
     // clang-format off
     /*[[[cog
@@ -426,21 +435,77 @@ void physical_constraints_compact_derivs(double **uZipConVars,
     //
 
     if (dsolve::SOLVER_DERIV_TYPE == dendro_cfd::CFD_NONE) {
-        dendro_derivs::deriv_x(grad_0_E0, E0, hx, sz, bflag);
-        dendro_derivs::deriv_y(grad_1_E1, E1, hy, sz, bflag);
-        dendro_derivs::deriv_z(grad_2_E2, E2, hz, sz, bflag);
+      dendro_derivs::deriv_x(grad_0_E0, E0, hx, sz, bflag);
+      dendro_derivs::deriv_y(grad_1_E1, E1, hy, sz, bflag);
+      dendro_derivs::deriv_z(grad_2_E2, E2, hz, sz, bflag);
 
-        dendro_derivs::deriv_x(grad_0_B0, B0, hx, sz, bflag);
-        dendro_derivs::deriv_y(grad_1_B1, B1, hy, sz, bflag);
-        dendro_derivs::deriv_z(grad_2_B2, B2, hz, sz, bflag);
+      dendro_derivs::deriv_x(grad_0_A0, A0, hx, sz, bflag);
+      dendro_derivs::deriv_y(grad_1_A1, A1, hy, sz, bflag);
+      dendro_derivs::deriv_z(grad_2_A2, A2, hz, sz, bflag);
+
+      dendro_derivs::deriv_y(grad_1_psi, psi, hy, sz, bflag);
+      dendro_derivs::deriv_z(grad_2_Gamma, Gamma, hz, sz, bflag);
+
+      dendro_derivs::deriv_x(grad_0_psi, psi, hx, sz, bflag);
+      dendro_derivs::deriv_y(grad_1_psi, psi, hy, sz, bflag);
+      dendro_derivs::deriv_z(grad_2_psi, psi, hz, sz, bflag);
+
+      dendro_derivs::deriv_x(grad_0_E0, E0, hx, sz, bflag);
+      dendro_derivs::deriv_y(grad_1_E0, E0, hy, sz, bflag);
+      dendro_derivs::deriv_z(grad_2_E0, E0, hz, sz, bflag);
+
+      dendro_derivs::deriv_x(grad_0_E1, E1, hx, sz, bflag);
+      dendro_derivs::deriv_y(grad_1_E1, E1, hy, sz, bflag);
+      dendro_derivs::deriv_z(grad_2_E1, E1, hz, sz, bflag);
+
+      dendro_derivs::deriv_x(grad_0_E2, E2, hx, sz, bflag);
+      dendro_derivs::deriv_y(grad_1_E2, E2, hy, sz, bflag);
+      dendro_derivs::deriv_z(grad_2_E2, E2, hz, sz, bflag);
+
+      dendro_derivs::deriv_x(grad_0_A0, A0, hx, sz, bflag);
+      dendro_derivs::deriv_y(grad_1_A0, A0, hy, sz, bflag);
+      dendro_derivs::deriv_z(grad_2_A0, A0, hz, sz, bflag);
+
+      dendro_derivs::deriv_x(grad_0_A1, A1, hx, sz, bflag);
+      dendro_derivs::deriv_y(grad_1_A1, A1, hy, sz, bflag);
+      dendro_derivs::deriv_z(grad_2_A1, A1, hz, sz, bflag);
+
+      dendro_derivs::deriv_x(grad_0_A2, A2, hx, sz, bflag);
+      dendro_derivs::deriv_y(grad_1_A2, A2, hy, sz, bflag);
+      dendro_derivs::deriv_z(grad_2_A2, A2, hz, sz, bflag);
+
+      //Second derivatives
+      // 2nd derivs for A0. 
+dendro_derivs::deriv_xx(grad2_0_0_A0, A0, hx, sz, bflag);
+dendro_derivs::deriv_yy(grad2_1_1_A0, A0, hy, sz, bflag);
+dendro_derivs::deriv_zz(grad2_2_2_A0, A0, hz, sz, bflag);
+
+// 2nd derivs for A1
+dendro_derivs::deriv_xx(grad2_0_0_A1, A1, hx, sz, bflag);
+dendro_derivs::deriv_yy(grad2_1_1_A1, A1, hy, sz, bflag);
+dendro_derivs::deriv_zz(grad2_2_2_A1, A1, hz, sz, bflag);
+
+// 2nd derivs for A2
+dendro_derivs::deriv_xx(grad2_0_0_A2, A2, hx, sz, bflag); 
+dendro_derivs::deriv_yy(grad2_1_1_A2, A2, hy, sz, bflag);
+dendro_derivs::deriv_zz(grad2_2_2_A2, A2, hz, sz, bflag);
+
+// 2nd derivs for psi 
+dendro_derivs::deriv_xx(grad2_0_0_psi, psi, hx, sz, bflag); 
+dendro_derivs::deriv_yy(grad2_1_1_psi, psi, hy, sz, bflag); 
+dendro_derivs::deriv_zz(grad2_2_2_psi, psi, hz, sz, bflag); 
+
+
     } else {
         cfd.cfd_x(grad_0_E0, E0, hx, sz, bflag);
         cfd.cfd_y(grad_1_E1, E1, hy, sz, bflag);
         cfd.cfd_z(grad_2_E2, E2, hz, sz, bflag);
 
-        cfd.cfd_x(grad_0_B0, B0, hx, sz, bflag);
-        cfd.cfd_y(grad_1_B1, B1, hy, sz, bflag);
-        cfd.cfd_z(grad_2_B2, B2, hz, sz, bflag);
+        cfd.cfd_x(grad_0_A0, A0, hx, sz, bflag);
+        cfd.cfd_y(grad_1_A1, A1, hy, sz, bflag);
+        cfd.cfd_z(grad_2_A2, A2, hz, sz, bflag);
+        cfd.cfd_y(grad_1_psi, psi, hy, sz, bflag);
+        cfd.cfd_z(grad_2_Gamma, A2, hz, sz, bflag);
     }
 
     double *rho_e = deriv_base + 9 * BLK_SZ;

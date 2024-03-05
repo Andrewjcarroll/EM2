@@ -69,9 +69,9 @@ cog.outl(dendroconf.dendroConfigs.generate_initial_data_declaration(var_type="ev
 
 
 /**
- * @brief Wrapper function for the analytical solve for EM3's initial data
+ * @brief Wrapper function for the analytical solve for EM2's initial data
  */
-void analyticalSolEM3_BLOCK(double **uZipAnalyticVars,
+void analyticalSolEM2_BLOCK(double **uZipAnalyticVars,
                             double **uZipAnalyticDiffVars,
                             const double **uZipVars, const double time, const unsigned int &offset,
                             const double *pmin, const double *pmax,
@@ -91,11 +91,11 @@ void analyticalSolEM3_BLOCK(double **uZipAnalyticVars,
  * @param[out] var Array to store the computed electromagnetic field variables.
  * @param[in] varsAreGrid If the variables are in "grid" form and not true form (default true).
  */
-void analyticalSolEM3(const double xx, const double yy, const double zz,
+void analyticalSolEM2(const double xx, const double yy, const double zz,
                       const double t, double *var, bool varsAreGrid = true);
 
 /**
- * @brief Initializes E and B fields for EM3 at a specified spatial point.
+ * @brief Initializes E and B fields for EM2 at a specified spatial point.
  *
  * This function initializes electromagnetic field variables at the given,
  * spatial point (x, y, z) by storing the results in the array 'var'.
@@ -105,7 +105,7 @@ void analyticalSolEM3(const double xx, const double yy, const double zz,
  * @param[in] z Z-coordinate of the spatial point.
  * @param[out] var Array to store the field variables.
  */
-void initDataEM3(const double x, const double y, const double z,
+void initDataEM2(const double x, const double y, const double z,
               double* var);
 
 /**

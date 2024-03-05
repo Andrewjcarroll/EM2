@@ -1,21 +1,25 @@
 
 // Dendro: {{{ 
-// Dendro: original ops:  27
+// Dendro: original ops:  49
 // Dendro: printing temp variables
 double DENDRO_0 = 4.0*PI;
 
 // Dendro: printing variables
 //--
-B_rhs0[pp] = -grad_1_E2[pp] + grad_2_E1[pp];
+A_rhs0[pp] = -E0[pp] - grad_0_psi[pp];
 //--
-B_rhs1[pp] = grad_0_E2[pp] - grad_2_E0[pp];
+A_rhs1[pp] = -E1[pp] - grad_1_psi[pp];
 //--
-B_rhs2[pp] = -grad_0_E1[pp] + grad_1_E0[pp];
+A_rhs2[pp] = -E2[pp] - grad_2_psi[pp];
 //--
-E_rhs0[pp] = -DENDRO_0*J0[pp] + grad_1_B2[pp] - grad_2_B1[pp];
+E_rhs0[pp] = -DENDRO_0*J0[pp] + grad_0_Gamma[pp] - grad2_0_0_A0[pp] - grad2_1_1_A0[pp] - grad2_2_2_A0[pp];
 //--
-E_rhs1[pp] = -DENDRO_0*J1[pp] - grad_0_B2[pp] + grad_2_B0[pp];
+E_rhs1[pp] = -DENDRO_0*J1[pp] + grad_1_Gamma[pp] - grad2_0_0_A1[pp] - grad2_1_1_A1[pp] - grad2_2_2_A1[pp];
 //--
-E_rhs2[pp] = -DENDRO_0*J2[pp] + grad_0_B1[pp] - grad_1_B0[pp];
-// Dendro: reduced ops:  25
+E_rhs2[pp] = -DENDRO_0*J2[pp] + grad_2_Gamma[pp] - grad2_0_0_A2[pp] - grad2_1_1_A2[pp] - grad2_2_2_A2[pp];
+//--
+Gamma_rhs[pp] = -DENDRO_0*rho_e[pp] - grad2_0_0_psi[pp] - grad2_1_1_psi[pp] - grad2_2_2_psi[pp];
+//--
+psi_rhs[pp] = -Gamma[pp];
+// Dendro: reduced ops:  46
 // Dendro: }}} 

@@ -22,7 +22,7 @@
 #include "grUtils.h"
 #include "parameters.h"
 
-#ifdef EM3_ENABLE_COMPACT_DERIVS
+#ifdef EM2_ENABLE_COMPACT_DERIVS
 #include "compact_derivs.h"
 #endif
 
@@ -93,7 +93,7 @@ SOLVERCtx::SOLVERCtx(ot::Mesh *pMesh) : Ctx() {
 
     // then initialize the CFD stuff
 
-#ifdef EM3_ENABLE_COMPACT_DERIVS
+#ifdef EM2_ENABLE_COMPACT_DERIVS
     dendro_cfd::cfd.set_filter_type(dsolve::SOLVER_FILTER_TYPE);
     dendro_cfd::cfd.set_deriv_type(dsolve::SOLVER_DERIV_TYPE);
     dendro_cfd::cfd.set_second_deriv_type(dsolve::SOLVER_2ND_DERIV_TYPE);
@@ -218,7 +218,7 @@ void SOLVERCtx::compute_constraints() {
             ptmax[1] = GRIDY_TO_Y(blkList[blk].getBlockNode().maxY()) + PW * dy;
             ptmax[2] = GRIDZ_TO_Z(blkList[blk].getBlockNode().maxZ()) + PW * dz;
 
-#ifdef EM3_ENABLE_COMPACT_DERIVS
+#ifdef EM2_ENABLE_COMPACT_DERIVS
             physical_constraints_compact_derivs(
                 consUnzipVar, evolUnzipVar, offset, ptmin, ptmax, sz, bflag);
 #else
@@ -316,7 +316,7 @@ void SOLVERCtx::compute_analytical() {
             ptmax[1] = GRIDY_TO_Y(blkList[blk].getBlockNode().maxY()) + PW * dy;
             ptmax[2] = GRIDZ_TO_Z(blkList[blk].getBlockNode().maxZ()) + PW * dz;
 
-            dsolve::analyticalSolEM3_BLOCK(
+            dsolve::analyticalSolEM2_BLOCK(
                 analyticUnzipVar, analyticDiffUnzipVar,
                 (const DendroScalar **)evolUnzipVar, m_uiTinfo._m_uiT, offset,
                 ptmin, ptmax, sz, bflag);
@@ -395,7 +395,7 @@ void SOLVERCtx::compute_analytical() {
                             const DendroScalar z = pNodes[ownerID].getZ() +
                                                    kk_z * (len / (eleOrder));
 
-                            dsolve::analyticalSolEM3((double)x, (double)y,
+                            dsolve::analyticalSolEM2((double)x, (double)y,
                                                      (double)z,
                                                      m_uiTinfo._m_uiT, var);
 
@@ -965,7 +965,7 @@ int SOLVERCtx::write_vtu() {
 
 #endif
 
-#ifdef EM3_COMPUTE_ANALYTICAL
+#ifdef EM2_COMPUTE_ANALYTICAL
 
     DVec &m_analytic = m_var[VL::CPU_ANALYTIC];
     DVec &m_analytic_diff = m_var[VL::CPU_ANALYTIC_DIFF];
@@ -978,7 +978,7 @@ int SOLVERCtx::write_vtu() {
     m_analytic_diff.to_2d(analyticDiffVar);
 
 #endif
-    // end EM3_COMPUTE_ANALYTICAL
+    // end EM2_COMPUTE_ANALYTICAL
 
 #ifdef SOLVER_ENABLE_VTU_OUTPUT
 
@@ -989,14 +989,14 @@ int SOLVERCtx::write_vtu() {
         const unsigned int numEvolVars =
             dsolve::SOLVER_NUM_EVOL_VARS_VTU_OUTPUT;
 
-#ifdef EM3_COMPUTE_ANALYTICAL
+#ifdef EM2_COMPUTE_ANALYTICAL
         const unsigned int totalVTUVars = numConstVars + 3 * numEvolVars;
         double *pData[totalVTUVars];
 #else
         const unsigned int totalVTUVars = numConstVars + numEvolVars;
         double *pData[totalVTUVars];
 #endif
-        // end EM3_COMPUTE_ANALYTICAL
+        // end EM2_COMPUTE_ANALYTICAL
 
         for (unsigned int i = 0; i < numEvolVars; i++) {
             pDataNames.push_back(std::string(
@@ -1012,7 +1012,7 @@ int SOLVERCtx::write_vtu() {
                 consVar[SOLVER_VTU_OUTPUT_CONST_INDICES[i]];
         }
 
-#ifdef EM3_COMPUTE_ANALYTICAL
+#ifdef EM2_COMPUTE_ANALYTICAL
         for (unsigned int i = 0; i < numEvolVars; i++) {
             pDataNames.push_back(
                 std::string(dsolve::SOLVER_VAR_NAMES
@@ -1031,7 +1031,7 @@ int SOLVERCtx::write_vtu() {
                 analyticDiffVar[SOLVER_VTU_OUTPUT_EVOL_INDICES[i]];
         }
 #endif
-        // end EM3_COMPUTE_ANALYTICAL
+        // end EM2_COMPUTE_ANALYTICAL
 
         std::vector<char *> pDataNames_char;
         pDataNames_char.reserve(pDataNames.size());
@@ -1498,7 +1498,7 @@ int SOLVERCtx::terminal_output() {
 
         // and then the difference to analytical!
 
-#ifdef EM3_COMPUTE_ANALYTICAL
+#ifdef EM2_COMPUTE_ANALYTICAL
 
         this->compute_analytical();
 

@@ -1,8 +1,8 @@
 # ##############################################################################
-# CMAKE CONFIGURATION FILE FOR EM3 SOLVER
+# CMAKE CONFIGURATION FILE FOR EM2 SOLVER
 #
 # This file in particular contains all of the options that apply specificially
-# to the EM3 Solver binary as it is compiled.
+# to the EM2 Solver binary as it is compiled.
 #
 # Note that all options and compiler flags set in the ../CMakeLists.txt file
 # (the one in the root directory of the project) *are carried through* here.
@@ -47,13 +47,13 @@ option(
   "Allows you to save as VTU files all of the variables and their RHS at each time step"
   OFF)
 
-option(EM3_COMPUTE_ANALYTICAL   "Adds the computation of the analytical solution *and* computes the diff" ON)
+option(EM2_COMPUTE_ANALYTICAL   "Adds the computation of the analytical solution *and* computes the diff" ON)
 
-option(EM3_ENABLE_COMPACT_DERIVS "Swaps the RHS functionality to run compact finite differences" ON)
+option(EM2_ENABLE_COMPACT_DERIVS "Swaps the RHS functionality to run compact finite differences" ON)
 
-option(EM3_DEBUG_COMPACT_DERIVS "Enables some debug checks (like nan checking) in CFDs" ON)
+option(EM2_DEBUG_COMPACT_DERIVS "Enables some debug checks (like nan checking) in CFDs" ON)
 
-option(EM3_USE_XSMM_MAT_MUL "Enables the use of XSMM matrix multiplication (requires support in dendrolib)" OFF)
+option(EM2_USE_XSMM_MAT_MUL "Enables the use of XSMM matrix multiplication (requires support in dendrolib)" OFF)
 
 # setup for Intel-based vectorized computations
 if(SOLVER_ENABLE_AVX)
@@ -118,21 +118,21 @@ if(SOLVER_ENABLE_CUDA)
 endif()
 
 
-if(EM3_COMPUTE_ANALYTICAL)
-    add_definitions(-DEM3_COMPUTE_ANALYTICAL)
+if(EM2_COMPUTE_ANALYTICAL)
+    add_definitions(-DEM2_COMPUTE_ANALYTICAL)
 endif()
 
-if (EM3_ENABLE_COMPACT_DERIVS)
-    add_definitions(-DEM3_ENABLE_COMPACT_DERIVS)
+if (EM2_ENABLE_COMPACT_DERIVS)
+    add_definitions(-DEM2_ENABLE_COMPACT_DERIVS)
 endif()
 
 
-if (EM3_DEBUG_COMPACT_DERIVS)
-    add_definitions(-DEM3_DEBUG_COMPACT_DERIVS)
+if (EM2_DEBUG_COMPACT_DERIVS)
+    add_definitions(-DEM2_DEBUG_COMPACT_DERIVS)
 endif()
 
-if (EM3_USE_XSMM_MAT_MUL)
-    add_definitions(-DEM3_USE_XSMM_MAT_MUL)
+if (EM2_USE_XSMM_MAT_MUL)
+    add_definitions(-DEM2_USE_XSMM_MAT_MUL)
 endif()
 
 set(CUSTOM_SOLVER_INC
@@ -169,49 +169,49 @@ set(CUSTOM_SOLVER_SRC
 
 set(SOURCE_FILES solver_main.cpp
                  ${CUSTOM_SOLVER_INC} ${CUSTOM_SOLVER_SRC})
-add_executable(em3Solver ${SOURCE_FILES})
+add_executable(em2Solver ${SOURCE_FILES})
 
 # source directory is root of this project since this file is only called from
 # the outer CMake call
-target_include_directories(em3Solver PRIVATE ${CMAKE_SOURCE_DIR})
-target_include_directories(em3Solver PRIVATE ${CMAKE_SOURCE_DIR}/solver)
-target_include_directories(em3Solver PRIVATE ${CMAKE_SOURCE_DIR}/solver/include)
-target_include_directories(em3Solver PRIVATE ${CMAKE_SOURCE_DIR}/scripts)
-target_include_directories(em3Solver PRIVATE ${CMAKE_SOURCE_DIR}/dendrolib)
-target_include_directories(em3Solver
+target_include_directories(em2Solver PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(em2Solver PRIVATE ${CMAKE_SOURCE_DIR}/solver)
+target_include_directories(em2Solver PRIVATE ${CMAKE_SOURCE_DIR}/solver/include)
+target_include_directories(em2Solver PRIVATE ${CMAKE_SOURCE_DIR}/scripts)
+target_include_directories(em2Solver PRIVATE ${CMAKE_SOURCE_DIR}/dendrolib)
+target_include_directories(em2Solver
                            PRIVATE ${CMAKE_SOURCE_DIR}/dendrolib/include)
-target_include_directories(em3Solver
+target_include_directories(em2Solver
                            PRIVATE ${CMAKE_SOURCE_DIR}/dendrolib/test/include)
-target_include_directories(em3Solver
+target_include_directories(em2Solver
                            PRIVATE ${CMAKE_SOURCE_DIR}/dendrolib/examples/include)
-target_include_directories(em3Solver
+target_include_directories(em2Solver
                            PRIVATE ${CMAKE_SOURCE_DIR}/dendrolib/ODE/include)
-target_include_directories(em3Solver
+target_include_directories(em2Solver
                            PRIVATE ${CMAKE_SOURCE_DIR}/dendrolib/FEM/include)
-target_include_directories(em3Solver
+target_include_directories(em2Solver
                            PRIVATE ${CMAKE_SOURCE_DIR}/dendrolib/LinAlg/include)
-target_include_directories(em3Solver
+target_include_directories(em2Solver
                            PRIVATE ${CMAKE_SOURCE_DIR}/dendrolib/IO/include)
-target_include_directories(em3Solver
+target_include_directories(em2Solver
                            PRIVATE ${CMAKE_SOURCE_DIR}/dendrolib/IO/vtk/include)
-target_include_directories(em3Solver
+target_include_directories(em2Solver
                            PRIVATE ${CMAKE_SOURCE_DIR}/dendrolib/LinAlg/include)
-target_include_directories(em3Solver
+target_include_directories(em2Solver
                            PRIVATE ${CMAKE_DOURCE_DIR}/dendrolib/IO/zlib/inc)
 
 # and don't forget to include the MPI and GSL paths
-target_include_directories(em3Solver PRIVATE ${MPI_INCLUDE_PATH})
-target_include_directories(em3Solver PRIVATE ${GSL_INCLUDE_DIRS})
+target_include_directories(em2Solver PRIVATE ${MPI_INCLUDE_PATH})
+target_include_directories(em2Solver PRIVATE ${GSL_INCLUDE_DIRS})
 
 # also the toml library with the git submodule
-target_include_directories(em3Solver PRIVATE ${EXTERNAL_LIB_HEADERS})
+target_include_directories(em2Solver PRIVATE ${EXTERNAL_LIB_HEADERS})
 
 # then don't forget to link the libraries!!!!
-target_link_libraries(em3Solver dendro5 ${LAPACK_LIBRARIES} ${MPI_LIBRARIES}
+target_link_libraries(em2Solver dendro5 ${LAPACK_LIBRARIES} ${MPI_LIBRARIES}
                       ${GSL_LIBRARIES} m)
 
-if(EM3_USE_XSMM_MAT_MUL)
-    target_link_libraries(em3Solver xsmm)
+if(EM2_USE_XSMM_MAT_MUL)
+    target_link_libraries(em2Solver xsmm)
 endif()
 
 # then add the dependency add custom command to generate the source files from
@@ -235,6 +235,6 @@ endif()
 
 #   add_custom_target(COG_GENERATION DEPENDS ${CMAKE_SOURCE_DIR}/src/dummy.cpp)
 
-#   add_dependencies(em3Solver COG_GENERATION)
+#   add_dependencies(em2Solver COG_GENERATION)
 
 # endif()

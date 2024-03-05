@@ -578,7 +578,7 @@ void RK_SOLVER::writeToVTU(DendroScalar **evolZipVarIn,
                         y = pNodes[ownerID].getY() + jj_y * (len / (eleOrder));
                         z = pNodes[ownerID].getZ() + kk_z * (len / (eleOrder));
 
-                        dsolve::analyticalSolEM3((double)x, (double)y,
+                        dsolve::analyticalSolEM2((double)x, (double)y,
                                                  (double)z, m_uiCurrentTime,
                                                  var);
                         for (unsigned int v = 0; v < dsolve::SOLVER_NUM_VARS;
