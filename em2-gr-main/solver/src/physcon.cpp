@@ -276,7 +276,7 @@ void physical_constraints_compact_derivs(double **uZipConVars,
     const double hx = (pmax[0] - pmin[0]) / (nx - 1);
     const double hy = (pmax[1] - pmin[1]) / (ny - 1);
     const double hz = (pmax[2] - pmin[2]) / (nz - 1);
-
+// std::cout<<"made it to PHYSCON"<<std::endl;
     // printf("ALL EXCEPTIONS BEFORE COMPUTING CONSTRAINTS: ");
     // show_fe_exceptions();
 
@@ -569,4 +569,5 @@ dendro_derivs::deriv_zz(grad2_2_2_psi, psi, hz, sz, bflag);
 #include "../gencode/solver_physcon_deriv_memdealloc.cpp.inc"
     //[[[end]]]
     // clang-format on
+    // std::cout<<"made it ot the end of physcon"<<std::endl;
 }

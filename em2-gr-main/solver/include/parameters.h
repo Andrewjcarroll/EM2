@@ -93,7 +93,7 @@ extern unsigned int SOLVER_ELE_ORDER;
 extern unsigned int SOLVER_PADDING_WIDTH;
 
 /** @brief: The number of total variables */
-static const unsigned int SOLVER_NUM_VARS = 6;
+static const unsigned int SOLVER_NUM_VARS = 8;
 
 /** @brief: Number of constraint variables */
 static const unsigned int SOLVER_CONSTRAINT_NUM_VARS = 2;

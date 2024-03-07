@@ -19,9 +19,7 @@ project(DendroEm2 C CXX Fortran)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 
 # set up fsanatize flags to check for memory leaks, need to set them for C++, X, and linker but only on debug
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address,undefined -fno-sanitize-recover")
-set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -fsanitize=address,undefined -fno-sanitize-recover")
-set(CMAKE_EXE_LINKER_FLAGS_DEBUG "${CMAKE_EXE_LINKER_FLAGS_DEBUG} -fsanitize=address,undefined -fno-sanitize-recover")
+
 
 # find OpenMP, MPI, and GSL
 find_package(OpenMP REQUIRED)

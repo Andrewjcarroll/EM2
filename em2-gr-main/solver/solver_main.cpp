@@ -456,14 +456,14 @@ int main(int argc, char** argv) {
                     did_print_output_time = true;
                 }
 
-                dsolve::timer::profileInfoIntermediate(
-                    dsolve::SOLVER_PROFILE_FILE_PREFIX.c_str(),
-                    solverCtx->get_mesh(), step);
+                // dsolve::timer::profileInfoIntermediate(
+                //     dsolve::SOLVER_PROFILE_FILE_PREFIX.c_str(),
+                //     solverCtx->get_mesh(), step);
 
-                if (!rank_global)
-                    std::cout << BLD << GRN
-                              << "  --- FINISHED WRITING PROFILE DATA" << NRM
-                              << std::endl;
+                // if (!rank_global)
+                //     std::cout << BLD << GRN
+                //               << "  --- FINISHED WRITING PROFILE DATA" << NRM
+                //               << std::endl;
             }
 
             if ((step % dsolve::SOLVER_CHECKPT_FREQ) == 0)

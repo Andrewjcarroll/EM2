@@ -564,7 +564,7 @@ void solverrhs_compact_derivs(double **unzipVarsRHS, double **uZipVars,
     // if the function above changes, be sure to reflect the changes here
     //
     using namespace dendro_cfd;
-
+    //std::cout<<"made it to RHS"<<std::endl;
     // EVOLUTION VARIABLE EXTRACTION NOT RHS -AJC
         const double *Gamma = &uZipVars[VAR::U_GAMMA][offset];
         const double *psi = &uZipVars[VAR::U_PSI][offset];
