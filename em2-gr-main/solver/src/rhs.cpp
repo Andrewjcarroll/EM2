@@ -471,16 +471,16 @@ void solverrhs(double **unzipVarsRHS, const double **uZipVars,
                                    pmin, pmax, 2.0, 0.0, sz, bflag);
 
         asymptotic_and_falloff_bcs(A_rhs0, A0, grad_0_A0, grad_1_A0, grad_2_A0,
-                                   pmin, pmax, 2.0, 0.0, sz, bflag);
+                                   pmin, pmax, 1.0, 0.0, sz, bflag);
         asymptotic_and_falloff_bcs(A_rhs1, A1, grad_0_A1, grad_1_A1, grad_2_A1,
-                                   pmin, pmax, 2.0, 0.0, sz, bflag);
+                                   pmin, pmax, 1.0, 0.0, sz, bflag);
         asymptotic_and_falloff_bcs(A_rhs2, A2, grad_0_A2, grad_1_A2, grad_2_A2,
-                                   pmin, pmax, 2.0, 0.0, sz, bflag);
+                                   pmin, pmax, 1.0, 0.0, sz, bflag);
 
         asymptotic_and_falloff_bcs(psi_rhs, psi, grad_0_psi, grad_1_psi, grad_2_psi,
-                                   pmin, pmax, 2.0, 0.0, sz, bflag);
+                                   pmin, pmax, 1.0, 0.0, sz, bflag);
         asymptotic_and_falloff_bcs(Gamma_rhs, Gamma, grad_0_Gamma, grad_1_Gamma, grad_2_Gamma,
-                                   pmin, pmax, 2.0, 0.0, sz, bflag);
+                                   pmin, pmax, 1.0, 0.0, sz, bflag);
 
         //[[[end]]]
 
@@ -508,7 +508,7 @@ void solverrhs(double **unzipVarsRHS, const double **uZipVars,
             for (unsigned int i = PW; i < nx - PW; i++) {
                 const unsigned int pp = i + nx * (j + ny * k);
                 // Added KO DISSIPATION CALCULATIONS FROM EM2 CODE -AJC
-                Gamma_rhs[pp] += sigma*(grad_0_Gamma[pp]+grad_1_Gamma[pp]+grad_2_Gamma[pp]);
+            Gamma_rhs[pp] += sigma*(grad_0_Gamma[pp]+grad_1_Gamma[pp]+grad_2_Gamma[pp]);
             
             psi_rhs[pp] += sigma*(grad_0_psi[pp]+grad_1_psi[pp]+grad_2_psi[pp]);
             
