@@ -319,33 +319,33 @@ void physical_constraints_compact_derivs(double **uZipConVars,
   double *divA = &uZipConVars[VAR_CONSTRAINT::C_DIVA][offset];
   double *divE = &uZipConVars[VAR_CONSTRAINT::C_DIVE][offset];
 
-  const double *A0 = &uZipVars[VAR::U_A0][offset];
-  const double *A1 = &uZipVars[VAR::U_A1][offset];
-  const double *A2 = &uZipVars[VAR::U_A2][offset];
+   double *A0 = &uZipVars[VAR::U_A0][offset];
+   double *A1 = &uZipVars[VAR::U_A1][offset];
+   double *A2 = &uZipVars[VAR::U_A2][offset];
   
-  const double *E0 = &uZipVars[VAR::U_E0][offset];
-  const double *E1 = &uZipVars[VAR::U_E1][offset];
-  const double *E2 = &uZipVars[VAR::U_E2][offset];
+   double *E0 = &uZipVars[VAR::U_E0][offset];
+   double *E1 = &uZipVars[VAR::U_E1][offset];
+   double *E2 = &uZipVars[VAR::U_E2][offset];
 
-  const double *psi = &uZipVars[VAR::U_PSI][offset];
-  const double *Gamma = &uZipVars[VAR::U_GAMMA][offset];
+   double *psi = &uZipVars[VAR::U_PSI][offset];
+   double *Gamma = &uZipVars[VAR::U_GAMMA][offset];
 
     //[[[end]]]
 
     const unsigned int PW = dsolve::SOLVER_PADDING_WIDTH;
 
 //TO DO FIX THIS 
-    // if (bflag != 0) {
-    //     cfd.clear_boundary_padding_nans(E0, sz, bflag);
-    //     cfd.clear_boundary_padding_nans(E1, sz, bflag);
-    //     cfd.clear_boundary_padding_nans(E2, sz, bflag);
+    if (bflag != 0) {
+        cfd.clear_boundary_padding_nans(E0, sz, bflag);
+        cfd.clear_boundary_padding_nans(E1, sz, bflag);
+        cfd.clear_boundary_padding_nans(E2, sz, bflag);
 
-    //     cfd.clear_boundary_padding_nans(A0, sz, bflag);
-    //     cfd.clear_boundary_padding_nans(A1, sz, bflag);
-    //     cfd.clear_boundary_padding_nans(A2, sz, bflag);
-    //     cfd.clear_boundary_padding_nans(psi, sz, bflag);
-    //     cfd.clear_boundary_padding_nans(Gamma, sz, bflag);
-    // }
+        cfd.clear_boundary_padding_nans(A0, sz, bflag);
+        cfd.clear_boundary_padding_nans(A1, sz, bflag);
+        cfd.clear_boundary_padding_nans(A2, sz, bflag);
+        cfd.clear_boundary_padding_nans(psi, sz, bflag);
+        cfd.clear_boundary_padding_nans(Gamma, sz, bflag);
+    }
 
     // clang-format off
     /*[[[cog

@@ -566,14 +566,14 @@ void solverrhs_compact_derivs(double **unzipVarsRHS, double **uZipVars,
     using namespace dendro_cfd;
     //std::cout<<"made it to RHS"<<std::endl;
     // EVOLUTION VARIABLE EXTRACTION NOT RHS -AJC
-        const double *Gamma = &uZipVars[VAR::U_GAMMA][offset];
-        const double *psi = &uZipVars[VAR::U_PSI][offset];
-        const double *E0 = &uZipVars[VAR::U_E0][offset];
-        const double *E1 = &uZipVars[VAR::U_E1][offset];
-        const double *E2 = &uZipVars[VAR::U_E2][offset];
-        const double *A0 = &uZipVars[VAR::U_A0][offset];
-        const double *A1 = &uZipVars[VAR::U_A1][offset];
-        const double *A2 = &uZipVars[VAR::U_A2][offset];
+         double *Gamma = &uZipVars[VAR::U_GAMMA][offset];
+         double *psi = &uZipVars[VAR::U_PSI][offset];
+         double *E0 = &uZipVars[VAR::U_E0][offset];
+         double *E1 = &uZipVars[VAR::U_E1][offset];
+         double *E2 = &uZipVars[VAR::U_E2][offset];
+         double *A0 = &uZipVars[VAR::U_A0][offset];
+         double *A1 = &uZipVars[VAR::U_A1][offset];
+         double *A2 = &uZipVars[VAR::U_A2][offset];
 
         double *Gamma_rhs = &unzipVarsRHS[VAR::U_GAMMA][offset];
         double *psi_rhs = &unzipVarsRHS[VAR::U_PSI][offset];
@@ -590,17 +590,17 @@ void solverrhs_compact_derivs(double **unzipVarsRHS, double **uZipVars,
     // entire *ROW* or *COLUMN* of our output derivatives can get filled with
     // nans after just one computation! Calling this function removes any nans
     // in the boundary.
-    // if (bflag != 0) {
-    //     cfd.clear_boundary_padding_nans(E0, sz, bflag);
-    //     cfd.clear_boundary_padding_nans(E1, sz, bflag);
-    //     cfd.clear_boundary_padding_nans(E2, sz, bflag);
+    if (bflag != 0) {
+        cfd.clear_boundary_padding_nans(E0, sz, bflag);
+        cfd.clear_boundary_padding_nans(E1, sz, bflag);
+        cfd.clear_boundary_padding_nans(E2, sz, bflag);
 
-    //     cfd.clear_boundary_padding_nans(A0, sz, bflag);
-    //     cfd.clear_boundary_padding_nans(A1, sz, bflag);
-    //     cfd.clear_boundary_padding_nans(A2, sz, bflag);
-    //     cfd.clear_boundary_padding_nans(psi, sz, bflag);
-    //     cfd.clear_boundary_padding_nans(Gamma, sz, bflag);
-    // }
+        cfd.clear_boundary_padding_nans(A0, sz, bflag);
+        cfd.clear_boundary_padding_nans(A1, sz, bflag);
+        cfd.clear_boundary_padding_nans(A2, sz, bflag);
+        cfd.clear_boundary_padding_nans(psi, sz, bflag);
+        cfd.clear_boundary_padding_nans(Gamma, sz, bflag);
+    }
 
     mem::memory_pool<double> *__mem_pool = &SOLVER_MEM_POOL;
 
@@ -850,16 +850,16 @@ dendro_derivs::deriv_zz(grad2_2_2_psi, psi, hz, sz, bflag);
                                    pmin, pmax, 2.0, 0.0, sz, bflag);
 
         asymptotic_and_falloff_bcs(A_rhs0, A0, grad_0_A0, grad_1_A0, grad_2_A0,
-                                   pmin, pmax, 2.0, 0.0, sz, bflag);
+                                   pmin, pmax, 1.0, 0.0, sz, bflag);
         asymptotic_and_falloff_bcs(A_rhs1, A1, grad_0_A1, grad_1_A1, grad_2_A1,
-                                   pmin, pmax, 2.0, 0.0, sz, bflag);
+                                   pmin, pmax, 1.0, 0.0, sz, bflag);
         asymptotic_and_falloff_bcs(A_rhs2, A2, grad_0_A2, grad_1_A2, grad_2_A2,
-                                   pmin, pmax, 2.0, 0.0, sz, bflag);
+                                   pmin, pmax, 1.0, 0.0, sz, bflag);
 
         asymptotic_and_falloff_bcs(psi_rhs, psi, grad_0_psi, grad_1_psi, grad_2_psi,
-                                   pmin, pmax, 2.0, 0.0, sz, bflag);
+                                   pmin, pmax, 1.0, 0.0, sz, bflag);
         asymptotic_and_falloff_bcs(Gamma_rhs, Gamma, grad_0_Gamma, grad_1_Gamma, grad_2_Gamma,
-                                   pmin, pmax, 2.0, 0.0, sz, bflag);
+                                   pmin, pmax, 1.0, 0.0, sz, bflag);
 
         //[[[end]]]
 
