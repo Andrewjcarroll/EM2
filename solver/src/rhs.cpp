@@ -750,27 +750,6 @@ void solverrhs_compact_derivs(double **unzipVarsRHS, double **uZipVars,
                                bflag);  // needed
         dendro_derivs::deriv_z(grad_2_Gamma, Gamma_cpy, hz, sz, bflag);
 
-        // Second derivatives
-        //  2nd derivs for A0.
-        dendro_derivs::deriv_xx(grad2_0_0_A0, A0, hx, sz, bflag);
-        dendro_derivs::deriv_yy(grad2_1_1_A0, A0, hy, sz, bflag);
-        dendro_derivs::deriv_zz(grad2_2_2_A0, A0, hz, sz, bflag);
-
-        // 2nd derivs for A1
-        dendro_derivs::deriv_xx(grad2_0_0_A1, A1, hx, sz, bflag);
-        dendro_derivs::deriv_yy(grad2_1_1_A1, A1, hy, sz, bflag);
-        dendro_derivs::deriv_zz(grad2_2_2_A1, A1, hz, sz, bflag);
-
-        // 2nd derivs for A2
-        dendro_derivs::deriv_xx(grad2_0_0_A2, A2, hx, sz, bflag);
-        dendro_derivs::deriv_yy(grad2_1_1_A2, A2, hy, sz, bflag);
-        dendro_derivs::deriv_zz(grad2_2_2_A2, A2, hz, sz, bflag);
-
-        // 2nd derivs for psi
-        dendro_derivs::deriv_xx(grad2_0_0_psi, psi, hx, sz, bflag);
-        dendro_derivs::deriv_yy(grad2_1_1_psi, psi, hy, sz, bflag);
-        dendro_derivs::deriv_zz(grad2_2_2_psi, psi, hz, sz, bflag);
-
     } else {
         cfd.cfd_x(grad_0_E0, E0_cpy, hx, sz, bflag);
         cfd.cfd_y(grad_1_E0, E0_cpy, hy, sz, bflag);
@@ -806,6 +785,51 @@ void solverrhs_compact_derivs(double **unzipVarsRHS, double **uZipVars,
     }
     // after this point we no longer care about E0_cpy because we just needed it
     // for our derivative inputs
+    //
+
+    if (dsolve::SOLVER_2ND_DERIV_TYPE == dendro_cfd::CFD2ND_NONE) {
+        // Second derivatives
+        //  2nd derivs for A0.
+        dendro_derivs::deriv_xx(grad2_0_0_A0, A0, hx, sz, bflag);
+        dendro_derivs::deriv_yy(grad2_1_1_A0, A0, hy, sz, bflag);
+        dendro_derivs::deriv_zz(grad2_2_2_A0, A0, hz, sz, bflag);
+
+        // 2nd derivs for A1
+        dendro_derivs::deriv_xx(grad2_0_0_A1, A1, hx, sz, bflag);
+        dendro_derivs::deriv_yy(grad2_1_1_A1, A1, hy, sz, bflag);
+        dendro_derivs::deriv_zz(grad2_2_2_A1, A1, hz, sz, bflag);
+
+        // 2nd derivs for A2
+        dendro_derivs::deriv_xx(grad2_0_0_A2, A2, hx, sz, bflag);
+        dendro_derivs::deriv_yy(grad2_1_1_A2, A2, hy, sz, bflag);
+        dendro_derivs::deriv_zz(grad2_2_2_A2, A2, hz, sz, bflag);
+
+        // 2nd derivs for psi
+        dendro_derivs::deriv_xx(grad2_0_0_psi, psi, hx, sz, bflag);
+        dendro_derivs::deriv_yy(grad2_1_1_psi, psi, hy, sz, bflag);
+        dendro_derivs::deriv_zz(grad2_2_2_psi, psi, hz, sz, bflag);
+    } else {
+        // Second derivatives
+        //  2nd derivs for A0.
+        cfd.cfd_xx(grad2_0_0_A0, A0, hx, sz, bflag);
+        cfd.cfd_yy(grad2_1_1_A0, A0, hy, sz, bflag);
+        cfd.cfd_zz(grad2_2_2_A0, A0, hz, sz, bflag);
+
+        // 2nd derivs for A1
+        cfd.cfd_xx(grad2_0_0_A1, A1, hx, sz, bflag);
+        cfd.cfd_yy(grad2_1_1_A1, A1, hy, sz, bflag);
+        cfd.cfd_zz(grad2_2_2_A1, A1, hz, sz, bflag);
+
+        // 2nd derivs for A2
+        cfd.cfd_xx(grad2_0_0_A2, A2, hx, sz, bflag);
+        cfd.cfd_yy(grad2_1_1_A2, A2, hy, sz, bflag);
+        cfd.cfd_zz(grad2_2_2_A2, A2, hz, sz, bflag);
+
+        // 2nd derivs for psi
+        cfd.cfd_xx(grad2_0_0_psi, psi, hx, sz, bflag);
+        cfd.cfd_yy(grad2_1_1_psi, psi, hy, sz, bflag);
+        cfd.cfd_zz(grad2_2_2_psi, psi, hz, sz, bflag);
+    }
 
     dsolve::timer::t_deriv.stop();
 
