@@ -257,26 +257,27 @@ void solverrhs(double **unzipVarsRHS, const double **uZipVars,
     ]]]*/
  
     //[[[end]]]
+    // clang-format on
 
-    //EVOLUTION VARIABLE EXTRACTION NOT RHS -AJC
-   
-  const double *Gamma = &uZipVars[VAR::U_GAMMA][offset];
-  const double *psi = &uZipVars[VAR::U_PSI][offset];
-  const double *E0 = &uZipVars[VAR::U_E0][offset];
-  const double *E1 = &uZipVars[VAR::U_E1][offset];
-  const double *E2 = &uZipVars[VAR::U_E2][offset];
-  const double *A0 = &uZipVars[VAR::U_A0][offset];
-  const double *A1 = &uZipVars[VAR::U_A1][offset];
-  const double *A2 = &uZipVars[VAR::U_A2][offset];
+    // EVOLUTION VARIABLE EXTRACTION NOT RHS -AJC
 
-  double *Gamma_rhs = &unzipVarsRHS[VAR::U_GAMMA][offset];
-  double *psi_rhs = &unzipVarsRHS[VAR::U_PSI][offset];
-  double *E_rhs0 = &unzipVarsRHS[VAR::U_E0][offset];
-  double *E_rhs1 = &unzipVarsRHS[VAR::U_E1][offset];
-  double *E_rhs2 = &unzipVarsRHS[VAR::U_E2][offset];
-  double *A_rhs0 = &unzipVarsRHS[VAR::U_A0][offset];
-  double *A_rhs1 = &unzipVarsRHS[VAR::U_A1][offset];
-  double *A_rhs2 = &unzipVarsRHS[VAR::U_A2][offset];
+    const double *Gamma = &uZipVars[VAR::U_GAMMA][offset];
+    const double *psi = &uZipVars[VAR::U_PSI][offset];
+    const double *E0 = &uZipVars[VAR::U_E0][offset];
+    const double *E1 = &uZipVars[VAR::U_E1][offset];
+    const double *E2 = &uZipVars[VAR::U_E2][offset];
+    const double *A0 = &uZipVars[VAR::U_A0][offset];
+    const double *A1 = &uZipVars[VAR::U_A1][offset];
+    const double *A2 = &uZipVars[VAR::U_A2][offset];
+
+    double *Gamma_rhs = &unzipVarsRHS[VAR::U_GAMMA][offset];
+    double *psi_rhs = &unzipVarsRHS[VAR::U_PSI][offset];
+    double *E_rhs0 = &unzipVarsRHS[VAR::U_E0][offset];
+    double *E_rhs1 = &unzipVarsRHS[VAR::U_E1][offset];
+    double *E_rhs2 = &unzipVarsRHS[VAR::U_E2][offset];
+    double *A_rhs0 = &unzipVarsRHS[VAR::U_A0][offset];
+    double *A_rhs1 = &unzipVarsRHS[VAR::U_A1][offset];
+    double *A_rhs2 = &unzipVarsRHS[VAR::U_A2][offset];
 
     mem::memory_pool<double> *__mem_pool = &SOLVER_MEM_POOL;
 
@@ -477,10 +478,11 @@ void solverrhs(double **unzipVarsRHS, const double **uZipVars,
         asymptotic_and_falloff_bcs(A_rhs2, A2, grad_0_A2, grad_1_A2, grad_2_A2,
                                    pmin, pmax, 1.0, 0.0, sz, bflag);
 
-        asymptotic_and_falloff_bcs(psi_rhs, psi, grad_0_psi, grad_1_psi, grad_2_psi,
-                                   pmin, pmax, 1.0, 0.0, sz, bflag);
-        asymptotic_and_falloff_bcs(Gamma_rhs, Gamma, grad_0_Gamma, grad_1_Gamma, grad_2_Gamma,
-                                   pmin, pmax, 1.0, 0.0, sz, bflag);
+        asymptotic_and_falloff_bcs(psi_rhs, psi, grad_0_psi, grad_1_psi,
+                                   grad_2_psi, pmin, pmax, 1.0, 0.0, sz, bflag);
+        asymptotic_and_falloff_bcs(Gamma_rhs, Gamma, grad_0_Gamma, grad_1_Gamma,
+                                   grad_2_Gamma, pmin, pmax, 1.0, 0.0, sz,
+                                   bflag);
 
         //[[[end]]]
 
@@ -508,18 +510,26 @@ void solverrhs(double **unzipVarsRHS, const double **uZipVars,
             for (unsigned int i = PW; i < nx - PW; i++) {
                 const unsigned int pp = i + nx * (j + ny * k);
                 // Added KO DISSIPATION CALCULATIONS FROM EM2 CODE -AJC
-            Gamma_rhs[pp] += sigma*(grad_0_Gamma[pp]+grad_1_Gamma[pp]+grad_2_Gamma[pp]);
-            
-            psi_rhs[pp] += sigma*(grad_0_psi[pp]+grad_1_psi[pp]+grad_2_psi[pp]);
-            
-            E_rhs0[pp] += sigma*(grad_0_E0[pp] + grad_1_E0[pp] + grad_2_E0[pp]);
-            E_rhs1[pp] += sigma*(grad_0_E1[pp] + grad_1_E1[pp] + grad_2_E1[pp]);
-            E_rhs2[pp] += sigma*(grad_0_E2[pp] + grad_1_E2[pp] + grad_2_E2[pp]);
-            
-            A_rhs0[pp] += sigma*(grad_0_A0[pp] + grad_1_A0[pp] + grad_2_A0[pp]);
-            A_rhs1[pp] += sigma*(grad_0_A1[pp] + grad_1_A1[pp] + grad_2_A1[pp]);
-            A_rhs2[pp] += sigma*(grad_0_A2[pp] + grad_1_A2[pp] + grad_2_A2[pp]);
-    
+                Gamma_rhs[pp] += sigma * (grad_0_Gamma[pp] + grad_1_Gamma[pp] +
+                                          grad_2_Gamma[pp]);
+
+                psi_rhs[pp] +=
+                    sigma * (grad_0_psi[pp] + grad_1_psi[pp] + grad_2_psi[pp]);
+
+                E_rhs0[pp] +=
+                    sigma * (grad_0_E0[pp] + grad_1_E0[pp] + grad_2_E0[pp]);
+                E_rhs1[pp] +=
+                    sigma * (grad_0_E1[pp] + grad_1_E1[pp] + grad_2_E1[pp]);
+                E_rhs2[pp] +=
+                    sigma * (grad_0_E2[pp] + grad_1_E2[pp] + grad_2_E2[pp]);
+
+                A_rhs0[pp] +=
+                    sigma * (grad_0_A0[pp] + grad_1_A0[pp] + grad_2_A0[pp]);
+                A_rhs1[pp] +=
+                    sigma * (grad_0_A1[pp] + grad_1_A1[pp] + grad_2_A1[pp]);
+                A_rhs2[pp] +=
+                    sigma * (grad_0_A2[pp] + grad_1_A2[pp] + grad_2_A2[pp]);
+
                 // clang-format off
                 /*[[[cog
                 cog.outl('// clang-format on')
@@ -564,25 +574,25 @@ void solverrhs_compact_derivs(double **unzipVarsRHS, double **uZipVars,
     // if the function above changes, be sure to reflect the changes here
     //
     using namespace dendro_cfd;
-    //std::cout<<"made it to RHS"<<std::endl;
-    // EVOLUTION VARIABLE EXTRACTION NOT RHS -AJC
-         double *Gamma = &uZipVars[VAR::U_GAMMA][offset];
-         double *psi = &uZipVars[VAR::U_PSI][offset];
-         double *E0 = &uZipVars[VAR::U_E0][offset];
-         double *E1 = &uZipVars[VAR::U_E1][offset];
-         double *E2 = &uZipVars[VAR::U_E2][offset];
-         double *A0 = &uZipVars[VAR::U_A0][offset];
-         double *A1 = &uZipVars[VAR::U_A1][offset];
-         double *A2 = &uZipVars[VAR::U_A2][offset];
+    // std::cout<<"made it to RHS"<<std::endl;
+    //  EVOLUTION VARIABLE EXTRACTION NOT RHS -AJC
+    double *Gamma = &uZipVars[VAR::U_GAMMA][offset];
+    double *psi = &uZipVars[VAR::U_PSI][offset];
+    double *E0 = &uZipVars[VAR::U_E0][offset];
+    double *E1 = &uZipVars[VAR::U_E1][offset];
+    double *E2 = &uZipVars[VAR::U_E2][offset];
+    double *A0 = &uZipVars[VAR::U_A0][offset];
+    double *A1 = &uZipVars[VAR::U_A1][offset];
+    double *A2 = &uZipVars[VAR::U_A2][offset];
 
-        double *Gamma_rhs = &unzipVarsRHS[VAR::U_GAMMA][offset];
-        double *psi_rhs = &unzipVarsRHS[VAR::U_PSI][offset];
-        double *E_rhs0 = &unzipVarsRHS[VAR::U_E0][offset];
-        double *E_rhs1 = &unzipVarsRHS[VAR::U_E1][offset];
-        double *E_rhs2 = &unzipVarsRHS[VAR::U_E2][offset];
-        double *A_rhs0 = &unzipVarsRHS[VAR::U_A0][offset];
-        double *A_rhs1 = &unzipVarsRHS[VAR::U_A1][offset];
-        double *A_rhs2 = &unzipVarsRHS[VAR::U_A2][offset];
+    double *Gamma_rhs = &unzipVarsRHS[VAR::U_GAMMA][offset];
+    double *psi_rhs = &unzipVarsRHS[VAR::U_PSI][offset];
+    double *E_rhs0 = &unzipVarsRHS[VAR::U_E0][offset];
+    double *E_rhs1 = &unzipVarsRHS[VAR::U_E1][offset];
+    double *E_rhs2 = &unzipVarsRHS[VAR::U_E2][offset];
+    double *A_rhs0 = &unzipVarsRHS[VAR::U_A0][offset];
+    double *A_rhs1 = &unzipVarsRHS[VAR::U_A1][offset];
+    double *A_rhs2 = &unzipVarsRHS[VAR::U_A2][offset];
 
     // NOTE: in the padding regions in blocks at the boundaries, the memory is
     // unallocated, which means there can be nans. These nans "poison" the
@@ -641,7 +651,6 @@ void solverrhs_compact_derivs(double **unzipVarsRHS, double **uZipVars,
     double *A2_cpy = (double *)A2;
     double *psi_cpy = (double *)psi;
     double *Gamma_cpy = (double *)Gamma;
-
 
     // make sure we only trigger this filtering if it's a filter designed for it
     if (dsolve::SOLVER_FILTER_TYPE != dendro_cfd::FILT_NONE ||
@@ -735,30 +744,32 @@ void solverrhs_compact_derivs(double **unzipVarsRHS, double **uZipVars,
         dendro_derivs::deriv_y(grad_1_psi, psi_cpy, hy, sz, bflag);  // needed
         dendro_derivs::deriv_z(grad_2_psi, psi_cpy, hz, sz, bflag);
 
-        dendro_derivs::deriv_x(grad_0_Gamma, Gamma_cpy, hx, sz, bflag);  // needed
-        dendro_derivs::deriv_y(grad_1_Gamma, Gamma_cpy, hy, sz, bflag);  // needed
+        dendro_derivs::deriv_x(grad_0_Gamma, Gamma_cpy, hx, sz,
+                               bflag);  // needed
+        dendro_derivs::deriv_y(grad_1_Gamma, Gamma_cpy, hy, sz,
+                               bflag);  // needed
         dendro_derivs::deriv_z(grad_2_Gamma, Gamma_cpy, hz, sz, bflag);
 
-        //Second derivatives
-        // 2nd derivs for A0. 
-dendro_derivs::deriv_xx(grad2_0_0_A0, A0, hx, sz, bflag);
-dendro_derivs::deriv_yy(grad2_1_1_A0, A0, hy, sz, bflag);
-dendro_derivs::deriv_zz(grad2_2_2_A0, A0, hz, sz, bflag);
+        // Second derivatives
+        //  2nd derivs for A0.
+        dendro_derivs::deriv_xx(grad2_0_0_A0, A0, hx, sz, bflag);
+        dendro_derivs::deriv_yy(grad2_1_1_A0, A0, hy, sz, bflag);
+        dendro_derivs::deriv_zz(grad2_2_2_A0, A0, hz, sz, bflag);
 
-// 2nd derivs for A1
-dendro_derivs::deriv_xx(grad2_0_0_A1, A1, hx, sz, bflag);
-dendro_derivs::deriv_yy(grad2_1_1_A1, A1, hy, sz, bflag);
-dendro_derivs::deriv_zz(grad2_2_2_A1, A1, hz, sz, bflag);
+        // 2nd derivs for A1
+        dendro_derivs::deriv_xx(grad2_0_0_A1, A1, hx, sz, bflag);
+        dendro_derivs::deriv_yy(grad2_1_1_A1, A1, hy, sz, bflag);
+        dendro_derivs::deriv_zz(grad2_2_2_A1, A1, hz, sz, bflag);
 
-// 2nd derivs for A2
-dendro_derivs::deriv_xx(grad2_0_0_A2, A2, hx, sz, bflag); 
-dendro_derivs::deriv_yy(grad2_1_1_A2, A2, hy, sz, bflag);
-dendro_derivs::deriv_zz(grad2_2_2_A2, A2, hz, sz, bflag);
+        // 2nd derivs for A2
+        dendro_derivs::deriv_xx(grad2_0_0_A2, A2, hx, sz, bflag);
+        dendro_derivs::deriv_yy(grad2_1_1_A2, A2, hy, sz, bflag);
+        dendro_derivs::deriv_zz(grad2_2_2_A2, A2, hz, sz, bflag);
 
-// 2nd derivs for psi 
-dendro_derivs::deriv_xx(grad2_0_0_psi, psi, hx, sz, bflag); 
-dendro_derivs::deriv_yy(grad2_1_1_psi, psi, hy, sz, bflag); 
-dendro_derivs::deriv_zz(grad2_2_2_psi, psi, hz, sz, bflag); 
+        // 2nd derivs for psi
+        dendro_derivs::deriv_xx(grad2_0_0_psi, psi, hx, sz, bflag);
+        dendro_derivs::deriv_yy(grad2_1_1_psi, psi, hy, sz, bflag);
+        dendro_derivs::deriv_zz(grad2_2_2_psi, psi, hz, sz, bflag);
 
     } else {
         cfd.cfd_x(grad_0_E0, E0_cpy, hx, sz, bflag);
@@ -856,10 +867,11 @@ dendro_derivs::deriv_zz(grad2_2_2_psi, psi, hz, sz, bflag);
         asymptotic_and_falloff_bcs(A_rhs2, A2, grad_0_A2, grad_1_A2, grad_2_A2,
                                    pmin, pmax, 1.0, 0.0, sz, bflag);
 
-        asymptotic_and_falloff_bcs(psi_rhs, psi, grad_0_psi, grad_1_psi, grad_2_psi,
-                                   pmin, pmax, 1.0, 0.0, sz, bflag);
-        asymptotic_and_falloff_bcs(Gamma_rhs, Gamma, grad_0_Gamma, grad_1_Gamma, grad_2_Gamma,
-                                   pmin, pmax, 1.0, 0.0, sz, bflag);
+        asymptotic_and_falloff_bcs(psi_rhs, psi, grad_0_psi, grad_1_psi,
+                                   grad_2_psi, pmin, pmax, 1.0, 0.0, sz, bflag);
+        asymptotic_and_falloff_bcs(Gamma_rhs, Gamma, grad_0_Gamma, grad_1_Gamma,
+                                   grad_2_Gamma, pmin, pmax, 1.0, 0.0, sz,
+                                   bflag);
 
         //[[[end]]]
 
@@ -889,18 +901,26 @@ dendro_derivs::deriv_zz(grad2_2_2_psi, psi, hz, sz, bflag);
 #endif
                 for (unsigned int i = PW; i < nx - PW; i++) {
                     const unsigned int pp = i + nx * (j + ny * k);
-            Gamma_rhs[pp] += sigma*(grad_0_Gamma[pp]+grad_1_Gamma[pp]+grad_2_Gamma[pp]);
-            
-            psi_rhs[pp] += sigma*(grad_0_psi[pp]+grad_1_psi[pp]+grad_2_psi[pp]);
-            
-            E_rhs0[pp] += sigma*(grad_0_E0[pp] + grad_1_E0[pp] + grad_2_E0[pp]);
-            E_rhs1[pp] += sigma*(grad_0_E1[pp] + grad_1_E1[pp] + grad_2_E1[pp]);
-            E_rhs2[pp] += sigma*(grad_0_E2[pp] + grad_1_E2[pp] + grad_2_E2[pp]);
-            
-            A_rhs0[pp] += sigma*(grad_0_A0[pp] + grad_1_A0[pp] + grad_2_A0[pp]);
-            A_rhs1[pp] += sigma*(grad_0_A1[pp] + grad_1_A1[pp] + grad_2_A1[pp]);
-            A_rhs2[pp] += sigma*(grad_0_A2[pp] + grad_1_A2[pp] + grad_2_A2[pp]);
-                    
+                    Gamma_rhs[pp] +=
+                        sigma * (grad_0_Gamma[pp] + grad_1_Gamma[pp] +
+                                 grad_2_Gamma[pp]);
+
+                    psi_rhs[pp] += sigma * (grad_0_psi[pp] + grad_1_psi[pp] +
+                                            grad_2_psi[pp]);
+
+                    E_rhs0[pp] +=
+                        sigma * (grad_0_E0[pp] + grad_1_E0[pp] + grad_2_E0[pp]);
+                    E_rhs1[pp] +=
+                        sigma * (grad_0_E1[pp] + grad_1_E1[pp] + grad_2_E1[pp]);
+                    E_rhs2[pp] +=
+                        sigma * (grad_0_E2[pp] + grad_1_E2[pp] + grad_2_E2[pp]);
+
+                    A_rhs0[pp] +=
+                        sigma * (grad_0_A0[pp] + grad_1_A0[pp] + grad_2_A0[pp]);
+                    A_rhs1[pp] +=
+                        sigma * (grad_0_A1[pp] + grad_1_A1[pp] + grad_2_A1[pp]);
+                    A_rhs2[pp] +=
+                        sigma * (grad_0_A2[pp] + grad_1_A2[pp] + grad_2_A2[pp]);
                 }
             }
         }

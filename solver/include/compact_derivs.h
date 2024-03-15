@@ -664,10 +664,13 @@ class CompactFiniteDiff {
         } else {
             m_beta_filt = 0.0;
         }
+        std::cout << "CFD: Filter Type Set To: " << m_filter_type << std::endl;
     }
 
     void set_deriv_boundary_type(BoundaryType boundary_type) {
         m_deriv_boundary_type = boundary_type;
+        std::cout << "CFD: Deriv Boundary Type set to: " << m_filter_type
+                  << std::endl;
     }
 
     void set_kim_params(double kc, double eps) {
@@ -689,6 +692,7 @@ class CompactFiniteDiff {
                 std::to_string(deriv_type));
         }
         m_deriv_type = deriv_type;
+        std::cout << "CFD: Deriv Type set to: " << m_filter_type << std::endl;
     }
 
     void set_second_deriv_type(const DerType2nd deriv_type) {
@@ -706,6 +710,9 @@ class CompactFiniteDiff {
                 std::to_string(deriv_type));
         }
         m_second_deriv_type = deriv_type;
+
+        std::cout << "CFD: Deriv 2nd Order Boundary Type set to: "
+                  << m_filter_type << std::endl;
     }
 
     /**
@@ -714,6 +721,7 @@ class CompactFiniteDiff {
      */
     void set_padding_size(const unsigned int padding_size) {
         m_padding_size = padding_size;
+        std::cout << "CFD: Padding Size set to: " << m_filter_type << std::endl;
     }
 
     void clear_boundary_padding_nans(double *u, const unsigned int *sz,
