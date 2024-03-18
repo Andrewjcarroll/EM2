@@ -55,6 +55,9 @@ option(EM2_DEBUG_COMPACT_DERIVS "Enables some debug checks (like nan checking) i
 
 option(EM2_USE_XSMM_MAT_MUL "Enables the use of XSMM matrix multiplication (requires support in dendrolib)" OFF)
 
+option(SOLVER_ENABLE_MERGED_BLOCKS "Allows the Compact Finite Differences to use merged blocks (requires OCT2BLK to not be 31)" OFF)
+
+
 # setup for Intel-based vectorized computations
 if(SOLVER_ENABLE_AVX)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
@@ -134,6 +137,12 @@ endif()
 if (EM2_USE_XSMM_MAT_MUL)
     add_definitions(-DEM2_USE_XSMM_MAT_MUL)
 endif()
+
+
+if (SOLVER_ENABLE_MERGED_BLOCKS)
+    add_definitions(-DSOLVER_ENABLE_MERGED_BLOCKS)
+endif()
+
 
 set(CUSTOM_SOLVER_INC
     ${CMAKE_SOURCE_DIR}/solver/include/solver_main.h

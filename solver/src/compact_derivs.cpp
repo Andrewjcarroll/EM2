@@ -25,6 +25,7 @@ CompactFiniteDiff::CompactFiniteDiff(const unsigned int num_dim,
                                      const DerType deriv_type,
                                      const DerType2nd second_deriv_type,
                                      const FilterType filter_type) {
+#ifndef SOLVER_ENABLE_MERGED_BLOCKS
     // don't bother initializing if the octree "fuses" blocks
     if (OCT2BLK_COARSEST_LEV != 31) {
         throw std::invalid_argument(
@@ -32,6 +33,7 @@ CompactFiniteDiff::CompactFiniteDiff(const unsigned int num_dim,
             "is not 31! Compact derivs are not yet supported for any other "
             "value. Please set this with CMake.");
     }
+#endif
 
     if (deriv_type != CFD_NONE && deriv_type != CFD_P1_O4 &&
         deriv_type != CFD_P1_O6 && deriv_type != CFD_Q1_O6_ETA1 &&
@@ -56,8 +58,10 @@ CompactFiniteDiff::CompactFiniteDiff(const unsigned int num_dim,
         return;
     }
 
-    initialize_cfd_matrix();
-    initialize_cfd_filter();
+    calculate_sizes_that_work();
+
+    initialize_all_cfd_matrices();
+    initialize_all_cfd_filters();
 
     // then make sure we initialize our kernel type
     initialize_cfd_kernels();
@@ -78,12 +82,14 @@ void CompactFiniteDiff::change_dim_size(const unsigned int dim_size) {
 
         m_curr_dim_size = dim_size;
 
+        calculate_sizes_that_work();
+
         initialize_cfd_storage();
 
         // if deriv type is none, for some reason, just exit
 
-        initialize_cfd_matrix();
-        initialize_cfd_filter();
+        initialize_all_cfd_matrices();
+        initialize_all_cfd_filters();
         initialize_cfd_kernels();
     }
 }
@@ -91,11 +97,28 @@ void CompactFiniteDiff::change_dim_size(const unsigned int dim_size) {
 void CompactFiniteDiff::initialize_cfd_storage() {
     // NOTE: 0 indicates that it's initialized with all elements set to 0
 
+#ifdef SOLVER_ENABLE_MERGED_BLOCKS
+    for (auto &element : m_available_r_sizes) {
+        // std::cout << "Initializing storage for " << element << std::endl;
+        m_R_storage[element] = std::vector<double *>();
+
+        // then iterate through the types and build up the sizes
+        std::vector<double *> *tempVec = &m_R_storage[element];
+
+        for (CompactDerivValueOrder ii = CompactDerivValueOrder::DERIV_NORM;
+             ii < CompactDerivValueOrder::R_MAT_END;
+             ii = static_cast<CompactDerivValueOrder>((size_t)ii + 1)) {
+            double *tempR = new double[element * element]();
+            tempVec->push_back(tempR);
+        }
+    }
+#else
     for (CompactDerivValueOrder ii = CompactDerivValueOrder::DERIV_NORM;
          ii < CompactDerivValueOrder::R_MAT_END;
          ii = static_cast<CompactDerivValueOrder>((size_t)ii + 1)) {
         m_RMatrices[ii] = new double[m_curr_dim_size * m_curr_dim_size]();
     }
+#endif
 
     // NOTE: the () syntax only works with C++ 11 or greater, may need to
     // use std::fill_n(array, n, 0); to 0 set the data or use std::memset(array,
@@ -105,6 +128,44 @@ void CompactFiniteDiff::initialize_cfd_storage() {
     m_u2d = new double[m_curr_dim_size * m_curr_dim_size];
     m_du1d = new double[m_curr_dim_size];
     m_du2d = new double[m_curr_dim_size * m_curr_dim_size];
+
+    initialize_cfd_3dblock_workspace(m_curr_dim_size * m_curr_dim_size *
+                                     m_curr_dim_size);
+}
+
+void CompactFiniteDiff::initialize_cfd_3dblock_workspace(
+    const unsigned int max_blk_sz) {
+    if (m_max_blk_sz == max_blk_sz) {
+        // do nothing and return, memory already allocated for this size
+        return;
+    }
+
+    // std::cout << "3D BLOCK INITIALIZATION SETTING MAX BLOCK SIZE TO "
+    // << max_blk_sz << std::endl;
+
+    // otherwise, let's make sure we delete the workspace because we're resizing
+    delete_cfd_3dblock_workspace();
+
+    // set the value for internal purposes
+    m_max_blk_sz = max_blk_sz;
+    m_du3d_block1 = new double[max_blk_sz];
+    m_du3d_block2 = new double[max_blk_sz];
+}
+
+void CompactFiniteDiff::delete_cfd_3dblock_workspace() {
+    // only attempt to delete if it's a nullptr
+    if (m_du3d_block1 != nullptr) {
+        delete[] m_du3d_block1;
+        m_du3d_block1 = nullptr;
+    }
+
+    if (m_du3d_block2 != nullptr) {
+        delete[] m_du3d_block2;
+        m_du3d_block2 = nullptr;
+    }
+
+    // make sure we internally set the size back to 0
+    m_max_blk_sz = 0;
 }
 
 void CompactFiniteDiff::initialize_cfd_kernels() {
@@ -162,17 +223,74 @@ void CompactFiniteDiff::delete_cfd_kernels() {
 #endif
 }
 
-void CompactFiniteDiff::initialize_cfd_matrix() {
+void CompactFiniteDiff::calculate_sizes_that_work() {
+    for (uint16_t i = 1; i < m_largest_fusion; i++) {
+        for (uint16_t j = i; j < m_largest_fusion; j++) {
+            uint32_t i_dim = (1 + i) * (m_padding_size * 2) + 1;
+            uint32_t j_dim = (1 + j) * (m_padding_size * 2) + 1;
+
+            if (std::cbrt((double)i_dim * (double)i_dim * (double)j_dim) <=
+                m_small_mat_threshold) {
+                m_matrix_size_pairs.push_back(std::make_tuple(i_dim, j_dim));
+            }
+            if (i == j) {
+                continue;
+            }
+            if (std::cbrt((double)j_dim * (double)j_dim * (double)i_dim) <=
+                m_small_mat_threshold) {
+                m_matrix_size_pairs.push_back(std::make_tuple(j_dim, i_dim));
+            }
+        }
+    }
+
+    // std::cout << "Finding unique i sizes to build matrices from: ";
+    for (auto &element : m_matrix_size_pairs) {
+        uint32_t i_dim, j_dim;
+        std::tie(i_dim, j_dim) = element;
+
+        // std::cout << " " << i_dim << "," << j_dim;
+
+        // only the i_dim is important here, check to see if it's in vector
+        if (std::find(m_available_r_sizes.begin(), m_available_r_sizes.end(),
+                      i_dim) == m_available_r_sizes.end()) {
+            m_available_r_sizes.push_back(i_dim);
+        }
+    }
+
+    // // TEMP: don't print this later
+    // std::cout << "These are the available sizes:";
+    //
+    // for (auto &element : m_available_r_sizes) {
+    //     std::cout << element << " ";
+    // }
+    // std::cout << std::endl;
+}
+
+void CompactFiniteDiff::initialize_all_cfd_matrices() {
+#ifdef SOLVER_ENABLE_MERGED_BLOCKS
+    for (auto &element : m_available_r_sizes) {
+        // std::cout << "Initializing matrices for " << element << std::endl;
+
+        initialize_cfd_matrix(element, m_R_storage[element].data());
+    }
+#else
+    initialize_cfd_matrix(m_curr_dim_size, m_RMatrices);
+#endif
+}
+
+void CompactFiniteDiff::initialize_cfd_matrix(const uint32_t curr_size,
+                                              double **outputLocation) {
     // temporary P and Q storage used in calculations
-    double *P = new double[m_curr_dim_size * m_curr_dim_size]();
-    double *Q = new double[m_curr_dim_size * m_curr_dim_size]();
+    double *P = new double[curr_size * curr_size]();
+    double *Q = new double[curr_size * curr_size]();
 
     // for each cfd matrix that needs to be initialized, we need the "base"
     // matrix, the "left edge" and the "right edge" to be safe.
 
-    // TODO: it might be necessary if the processor knows what boundaries it has
-    // but these matrices are small compared to the blocks that they're probably
-    // alright plus, these are only calculated once and not over and over again.
+    // TODO: it might be necessary if the processor knows what boundaries it
+    // has but these matrices are small compared to the blocks that they're
+    // probably alright plus, these are only calculated once and not over
+    // and over again.
 
     for (CompactDerivValueOrder ii = CompactDerivValueOrder::DERIV_NORM;
          ii < CompactDerivValueOrder::FILT_NORM;
@@ -194,8 +312,8 @@ void CompactFiniteDiff::initialize_cfd_matrix() {
                     ii == CompactDerivValueOrder::DERIV_LEFTRIGHT)) {
         }
 
-        setArrToZero(P, m_curr_dim_size * m_curr_dim_size);
-        setArrToZero(Q, m_curr_dim_size * m_curr_dim_size);
+        setArrToZero(P, curr_size * curr_size);
+        setArrToZero(Q, curr_size * curr_size);
 
         if (ii < CompactDerivValueOrder::DERIV_2ND_NORM) {
             if (m_deriv_type == CFD_NONE) continue;
@@ -220,8 +338,8 @@ void CompactFiniteDiff::initialize_cfd_matrix() {
                 ii == CompactDerivValueOrder::DERIV_LEFT ||
                 ii == CompactDerivValueOrder::DERIV_RIGHT ||
                 ii == CompactDerivValueOrder::DERIV_LEFTRIGHT) {
-                buildDerivExplicitRMatrix(m_RMatrices[ii], m_padding_size,
-                                          m_curr_dim_size, m_deriv_type, left_b,
+                buildDerivExplicitRMatrix(outputLocation[ii], m_padding_size,
+                                          curr_size, m_deriv_type, left_b,
                                           right_b);
                 continue;
             }
@@ -234,21 +352,20 @@ void CompactFiniteDiff::initialize_cfd_matrix() {
                 ii == CompactDerivValueOrder::DERIV_2ND_LEFT ||
                 ii == CompactDerivValueOrder::DERIV_2ND_RIGHT ||
                 ii == CompactDerivValueOrder::DERIV_2ND_LEFTRIGHT) {
-                build2ndDerivExplicitRMatrix(
-                    m_RMatrices[ii], m_padding_size, m_curr_dim_size,
-                    m_second_deriv_type, left_b, right_b);
+                build2ndDerivExplicitRMatrix(outputLocation[ii], m_padding_size,
+                                             curr_size, m_second_deriv_type,
+                                             left_b, right_b);
                 continue;
             }
         }
 
         if (ii == DERIV_NORM || ii == DERIV_RIGHT || ii == DERIV_LEFT ||
             ii == DERIV_LEFTRIGHT) {
-            buildPandQMatrices(P, Q, m_padding_size, m_curr_dim_size,
-                               m_deriv_type, left_b, right_b,
-                               m_deriv_boundary_type);
+            buildPandQMatrices(P, Q, m_padding_size, curr_size, m_deriv_type,
+                               left_b, right_b, m_deriv_boundary_type);
         } else if (ii == DERIV_2ND_NORM || ii == DERIV_2ND_RIGHT ||
                    ii == DERIV_2ND_LEFT) {
-            buildPandQMatrices2ndOrder(P, Q, m_padding_size, m_curr_dim_size,
+            buildPandQMatrices2ndOrder(P, Q, m_padding_size, curr_size,
                                        m_second_deriv_type, left_b, right_b,
                                        m_deriv_boundary_type);
         } else if (ii == DERIV_2ND_LEFTRIGHT) {
@@ -264,17 +381,17 @@ void CompactFiniteDiff::initialize_cfd_matrix() {
 
 #ifdef PRINT_COMPACT_MATRICES
         std::cout << "\nP MATRIX no=" << ii << std::endl;
-        print_square_mat(P, m_curr_dim_size);
+        print_square_mat(P, curr_size);
 
         std::cout << "\nQ MATRIX no=" << ii << std::endl;
-        print_square_mat(Q, m_curr_dim_size);
+        print_square_mat(Q, curr_size);
 #endif
 
-        calculateDerivMatrix(m_RMatrices[ii], P, Q, m_curr_dim_size);
+        calculateDerivMatrix(outputLocation[ii], P, Q, curr_size);
 
 #ifdef PRINT_COMPACT_MATRICES
         std::cout << "\nDERIV MATRIX no=" << ii << std::endl;
-        print_square_mat(m_RMatrices[ii], m_curr_dim_size);
+        print_square_mat(outputLocation[ii], curr_size);
 #endif
     }
 
@@ -282,7 +399,22 @@ void CompactFiniteDiff::initialize_cfd_matrix() {
     delete[] Q;
 }
 
-void CompactFiniteDiff::initialize_cfd_filter() {
+void CompactFiniteDiff::initialize_all_cfd_filters() {
+#ifdef SOLVER_ENABLE_MERGED_BLOCKS
+
+    for (auto &element : m_available_r_sizes) {
+        // std::cout << "Initializing filter matrices for " << element
+        //           << std::endl;
+
+        initialize_cfd_filter(element, m_R_storage[element].data());
+    }
+#else
+    initialize_cfd_filter(m_curr_dim_size, m_RMatrices);
+#endif
+}
+
+void CompactFiniteDiff::initialize_cfd_filter(const uint32_t curr_size,
+                                              double **outputLocation) {
     // exit early on filter none
     if (m_filter_type == FILT_NONE || m_filter_type == FILT_KO_DISS) {
         return;
@@ -291,46 +423,51 @@ void CompactFiniteDiff::initialize_cfd_filter() {
     // IMPORTANT: SET THE BETA PARAMETER BASED ON THE FILTER TYPE
     // NOTE: the use of this parameter will depend on if we are *adding* the
     // filter to the results or not. I.e., the Kim filters calculate the
-    // *difference*, while the JT filters calculate the results. So, KIM needs
-    // beta = 1.0, while JT needs beta = 0.0. 0.0 is the default (defined in
-    // compact_derivs.h)!
+    // *difference*, while the JT filters calculate the results. So, KIM
+    // needs beta = 1.0, while JT needs beta = 0.0. 0.0 is the default
+    // (defined in compact_derivs.h)!
     if (m_filter_type == FilterType::FILT_KIM_6) {
         m_beta_filt = 1.0;
     }
 
     // temporary P and Q storage used in calculations
-    double *P = new double[m_curr_dim_size * m_curr_dim_size]();
-    double *Q = new double[m_curr_dim_size * m_curr_dim_size]();
+    double *P = new double[curr_size * curr_size]();
+    double *Q = new double[curr_size * curr_size]();
 
     for (CompactDerivValueOrder ii = CompactDerivValueOrder::FILT_NORM;
          ii < CompactDerivValueOrder::R_MAT_END;
          ii = static_cast<CompactDerivValueOrder>((size_t)ii + 1)) {
-        setArrToZero(P, m_curr_dim_size * m_curr_dim_size);
-        setArrToZero(Q, m_curr_dim_size * m_curr_dim_size);
+        // HACK: this should be fixed, currently skipping this matrix
+        // calculation for ele order 4
+        if (ii == FILT_LEFTRIGHT && m_filter_type == FilterType::FILT_KIM_6 &&
+            curr_size < 11) {
+            continue;
+        }
+        setArrToZero(P, curr_size * curr_size);
+        setArrToZero(Q, curr_size * curr_size);
 
         // figure out if it's a left boundary
         bool left_b = (ii == FILT_LEFT || ii == FILT_LEFTRIGHT) ? true : false;
         bool right_b =
             (ii == FILT_RIGHT || ii == FILT_LEFTRIGHT) ? true : false;
 
-        buildPandQFilterMatrices(P, Q, m_padding_size, m_curr_dim_size,
-                                 m_filter_type, m_filt_alpha,
-                                 m_filt_bound_enable, left_b, right_b,
-                                 m_kim_filt_kc, m_kim_filt_eps);
+        buildPandQFilterMatrices(P, Q, m_padding_size, curr_size, m_filter_type,
+                                 m_filt_alpha, m_filt_bound_enable, left_b,
+                                 right_b, m_kim_filt_kc, m_kim_filt_eps);
 
 #ifdef PRINT_COMPACT_MATRICES
-        std::cout << "\nP MATRIX no=" << ii << std::endl;
-        print_square_mat(P, m_curr_dim_size);
+        std::cout << "\nFILTER P MATRIX no=" << ii << std::endl;
+        print_square_mat(P, curr_size);
 
-        std::cout << "\nQ MATRIX no=" << ii << std::endl;
-        print_square_mat(Q, m_curr_dim_size);
+        std::cout << "\nFILTER Q MATRIX no=" << ii << std::endl;
+        print_square_mat(Q, curr_size);
 #endif
 
-        calculateDerivMatrix(m_RMatrices[ii], P, Q, m_curr_dim_size);
+        calculateDerivMatrix(outputLocation[ii], P, Q, curr_size);
 
 #ifdef PRINT_COMPACT_MATRICES
         std::cout << "\nFILTER MATRIX no=" << ii << std::endl;
-        print_square_mat(m_RMatrices[ii], m_curr_dim_size);
+        print_square_mat(outputLocation[ii], curr_size);
 #endif
     }
 
@@ -344,11 +481,24 @@ void CompactFiniteDiff::delete_cfd_matrices() {
     delete[] m_du1d;
     delete[] m_du2d;
 
+    delete_cfd_3dblock_workspace();
+
+#ifdef SOLVER_ENABLE_MERGED_BLOCKS
+    for (auto &element : m_available_r_sizes) {
+        // then iterate through the types and build up the sizes
+        for (CompactDerivValueOrder ii = CompactDerivValueOrder::DERIV_NORM;
+             ii < CompactDerivValueOrder::R_MAT_END;
+             ii = static_cast<CompactDerivValueOrder>((size_t)ii + 1)) {
+            delete[] m_R_storage[element][ii];
+        }
+    }
+#else
     for (CompactDerivValueOrder ii = CompactDerivValueOrder::DERIV_NORM;
          ii < CompactDerivValueOrder::R_MAT_END;
          ii = static_cast<CompactDerivValueOrder>((size_t)ii + 1)) {
         delete[] m_RMatrices[ii];
     }
+#endif
 }
 
 void CompactFiniteDiff::clear_boundary_padding_nans(double *u,
@@ -358,8 +508,8 @@ void CompactFiniteDiff::clear_boundary_padding_nans(double *u,
     // ignore the function altogether, but better safe than sorry
     if (!bflag) return;
 
-    // HACK: this fix might not be the "fastest" way, it might be better to just
-    // flip a bit?
+    // HACK: this fix might not be the "fastest" way, it might be better to
+    // just flip a bit?
 
     // constant sizes of the block we're dealing with
     const unsigned int nx = sz[0];
@@ -370,8 +520,8 @@ void CompactFiniteDiff::clear_boundary_padding_nans(double *u,
     uint16_t zstart = 0;
     uint16_t zend = nz;
 
-    // CHUNK 1: the Z dimension "slices", they are done first because they are
-    // the fastest due to x and y being contiguous
+    // CHUNK 1: the Z dimension "slices", they are done first because they
+    // are the fastest due to x and y being contiguous
     if (bflag & (1u << OCT_DIR_BACK)) {
         for (uint16_t k = 0; k < m_padding_size; k++) {
             for (uint16_t j = 0; j < ny; j++) {
@@ -379,7 +529,8 @@ void CompactFiniteDiff::clear_boundary_padding_nans(double *u,
                     const int pp = INDEX_3D(i, j, k);
                     if (std::isnan(u[pp])) {
                         u[pp] = 0.0;
-                        // std::cout << "OCT_DIR_BACK NAN FIXED" << std::endl;
+                        // std::cout << "OCT_DIR_BACK NAN FIXED" <<
+                        // std::endl;
                     }
                 }
             }
@@ -392,7 +543,8 @@ void CompactFiniteDiff::clear_boundary_padding_nans(double *u,
                     const int pp = INDEX_3D(i, j, k);
                     if (std::isnan(u[pp])) {
                         u[pp] = 0.0;
-                        // std::cout << "OCT_DIR_FRONT NAN FIXED" << std::endl;
+                        // std::cout << "OCT_DIR_FRONT NAN FIXED" <<
+                        // std::endl;
                     }
                 }
             }
@@ -403,8 +555,8 @@ void CompactFiniteDiff::clear_boundary_padding_nans(double *u,
     uint16_t ystart = 0;
     uint16_t yend = ny;
 
-    // CHUNK 2: the Y dimension "slices", they are the second fastest because
-    // there's some contiguity to take advantage of
+    // CHUNK 2: the Y dimension "slices", they are the second fastest
+    // because there's some contiguity to take advantage of
     if (bflag & (1u << OCT_DIR_DOWN)) {
         for (uint16_t k = zstart; k < zend; k++) {
             for (uint16_t j = 0; j < m_padding_size; j++) {
@@ -412,7 +564,8 @@ void CompactFiniteDiff::clear_boundary_padding_nans(double *u,
                     const int pp = INDEX_3D(i, j, k);
                     if (std::isnan(u[pp])) {
                         u[pp] = 0.0;
-                        // std::cout << "OCT_DIR_DOWN NAN FIXED" << std::endl;
+                        // std::cout << "OCT_DIR_DOWN NAN FIXED" <<
+                        // std::endl;
                     }
                 }
             }
@@ -433,9 +586,9 @@ void CompactFiniteDiff::clear_boundary_padding_nans(double *u,
         yend = ny - m_padding_size;
     }
 
-    // CHUNK 3: the X dimension "slices", they are the slowest because of the
-    // jumping as we only look at "padding size" at most, and it could be
-    // unaligned for cache
+    // CHUNK 3: the X dimension "slices", they are the slowest because of
+    // the jumping as we only look at "padding size" at most, and it could
+    // be unaligned for cache
     if (bflag & (1u << OCT_DIR_LEFT)) {
         for (uint16_t k = zstart; k < zend; k++) {
             for (uint16_t j = ystart; j < yend; j++) {
@@ -443,7 +596,8 @@ void CompactFiniteDiff::clear_boundary_padding_nans(double *u,
                     const int pp = INDEX_3D(i, j, k);
                     if (std::isnan(u[pp])) {
                         u[pp] = 0.0;
-                        // std::cout << "OCT_DIR_LEFT NAN FIXED" << std::endl;
+                        // std::cout << "OCT_DIR_LEFT NAN FIXED" <<
+                        // std::endl;
                     }
                 }
             }
@@ -456,7 +610,8 @@ void CompactFiniteDiff::clear_boundary_padding_nans(double *u,
                     const int pp = INDEX_3D(i, j, k);
                     if (std::isnan(u[pp])) {
                         u[pp] = 0.0;
-                        // std::cout << "OCT_DIR_RIGHT NAN FIXED" << std::endl;
+                        // std::cout << "OCT_DIR_RIGHT NAN FIXED" <<
+                        // std::endl;
                     }
                 }
             }
@@ -490,8 +645,10 @@ void CompactFiniteDiff::cfd_x(double *const Dxu, const double *const u,
 
     // if (bflag)
     //     std::cout << "bflag: " << std::bitset<8>(bflag)
-    //               << " xstart, ystart, zstart: " << xstart << "," << ystart
-    //               << "," << zstart << " | xend, yend, zend: " << xend << ","
+    //               << " xstart, ystart, zstart: " << xstart << "," <<
+    //               ystart
+    //               << "," << zstart << " | xend, yend, zend: " << xend <<
+    //               ","
     //               << yend << "," << zend << std::endl;
 
     // check for nans
@@ -504,7 +661,8 @@ void CompactFiniteDiff::cfd_x(double *const Dxu, const double *const u,
                               << " file: " << __FILE__ << " line: " << __LINE__
                               << " (i, j, k): (" << i << ", " << j << ", " << k
                               << ") bflag: " << std::bitset<8>(bflag)
-                              << std::endl;
+                              << " (nx, ny, nz): (" << nx << ", " << ny << ", "
+                              << nz << ")" << std::endl;
                     MPI_Abort(MPI_COMM_WORLD, 1);
                 }
             }
@@ -519,18 +677,13 @@ void CompactFiniteDiff::cfd_x(double *const Dxu, const double *const u,
 
     int M = nx;
     int N = ny;
+    int K = nx;
+    // NOTE: LDA = M, LDB = K, and LDC = M
 #ifdef EM2_USE_XSMM_MAT_MUL
     const double alpha = 1.0 / dx;
 #else
     double alpha = 1.0 / dx;
 #endif
-    int K = nx;
-
-    // NOTE: LDA, LDB, and LDC should be nx, ny, and nz
-    // TODO: fix for non-square sizes
-    int LDA = nx;
-    int LDB = ny;
-    int LDC = nx;
 
     double *u_curr_chunk = (double *)u;
     double *du_curr_chunk = (double *)Dxu;
@@ -539,6 +692,19 @@ void CompactFiniteDiff::cfd_x(double *const Dxu, const double *const u,
 
     double *R_mat_use = nullptr;
 
+#ifdef SOLVER_ENABLE_MERGED_BLOCKS
+    if (!(bflag & (1u << OCT_DIR_LEFT)) && !(bflag & (1u << OCT_DIR_RIGHT))) {
+        R_mat_use = m_R_storage[nx][CompactDerivValueOrder::DERIV_NORM];
+    } else if ((bflag & (1u << OCT_DIR_LEFT)) &&
+               !(bflag & (1u << OCT_DIR_RIGHT))) {
+        R_mat_use = m_R_storage[nx][CompactDerivValueOrder::DERIV_LEFT];
+    } else if (!(bflag & (1u << OCT_DIR_LEFT)) &&
+               (bflag & (1u << OCT_DIR_RIGHT))) {
+        R_mat_use = m_R_storage[nx][CompactDerivValueOrder::DERIV_RIGHT];
+    } else {
+        R_mat_use = m_R_storage[nx][CompactDerivValueOrder::DERIV_LEFTRIGHT];
+    }
+#else
     // to reduce the number of checks, check for failing bflag first
     if (!(bflag & (1u << OCT_DIR_LEFT)) && !(bflag & (1u << OCT_DIR_RIGHT))) {
         R_mat_use = m_RMatrices[CompactDerivValueOrder::DERIV_NORM];
@@ -551,10 +717,11 @@ void CompactFiniteDiff::cfd_x(double *const Dxu, const double *const u,
     } else {
         R_mat_use = m_RMatrices[CompactDerivValueOrder::DERIV_LEFTRIGHT];
     }
+#endif
 
     // const libxsmm_mmfunction<double, double, LIBXSMM_PREFETCH_AUTO>
-    // xmm(LIBXSMM_GEMM_FLAGS(TRANSA, TRANSB), M, N, K, LDA, LDB, LDC, alpha,
-    // beta);
+    // xmm(LIBXSMM_GEMM_FLAGS(TRANSA, TRANSB), M, N, K, LDA, LDB, LDC,
+    // alpha, beta);
 
 #if EM2_DEBUG_COMPACT_DERIVS_OFF
 
@@ -594,8 +761,8 @@ void CompactFiniteDiff::cfd_x(double *const Dxu, const double *const u,
 
 #endif
 
-        dgemm_(&TRANSA, &TRANSB, &M, &N, &K, &alpha, R_mat_use, &LDA,
-               u_curr_chunk, &LDB, &beta, du_curr_chunk, &LDC);
+        dgemm_(&TRANSA, &TRANSB, &M, &N, &K, &alpha, R_mat_use, &M,
+               u_curr_chunk, &K, &beta, du_curr_chunk, &M);
 
 #endif
 
@@ -622,7 +789,8 @@ void CompactFiniteDiff::cfd_x(double *const Dxu, const double *const u,
                               << " line: " << __LINE__ << " (i, j, k): (" << i
                               << ", " << j << ", " << k
                               << ") bflag: " << std::bitset<8>(bflag)
-                              << std::endl;
+                              << " (nx, ny, nz): (" << nx << ", " << ny << ", "
+                              << nz << ")" << std::endl;
 
                     // then dump the original input matrix!
                     double *u_curr_chunk = (double *)u;
@@ -631,7 +799,7 @@ void CompactFiniteDiff::cfd_x(double *const Dxu, const double *const u,
                     for (unsigned int k = 0; k < nz; k++) {
                         std::cout << "k = " << k << std::endl;
 
-                        print_square_mat(u_curr_chunk, nx);
+                        print_nonsquare_mat(u_curr_chunk, ny, nx);
 
                         u_curr_chunk += nx * ny;
                     }
@@ -643,7 +811,7 @@ void CompactFiniteDiff::cfd_x(double *const Dxu, const double *const u,
                     for (unsigned int k = 0; k < nz; k++) {
                         std::cout << "k = " << k << std::endl;
 
-                        print_square_mat(du_curr_chunk, nx);
+                        print_nonsquare_mat(du_curr_chunk, ny, nx);
 
                         du_curr_chunk += nx * ny;
                     }
@@ -686,7 +854,8 @@ void CompactFiniteDiff::cfd_y(double *const Dyu, const double *const u,
                               << " file: " << __FILE__ << " line: " << __LINE__
                               << " (i, j, k): (" << i << ", " << j << ", " << k
                               << ") bflag: " << std::bitset<8>(bflag)
-                              << std::endl;
+                              << " (nx, ny, nz): (" << nx << ", " << ny << ", "
+                              << nz << ")" << std::endl;
                     MPI_Abort(MPI_COMM_WORLD, 1);
                 }
             }
@@ -699,6 +868,8 @@ void CompactFiniteDiff::cfd_y(double *const Dyu, const double *const u,
     int M = ny;
     int N = nx;
     int K = ny;
+    // NOTE: LDA = M, LDB = N, and LDC = M
+    // LDB is N because in memory, Y is transposed!
 
     double alpha = 1.0 / dy;
     double beta = 0.0;
@@ -707,6 +878,20 @@ void CompactFiniteDiff::cfd_y(double *const Dyu, const double *const u,
     double *du_curr_chunk = (double *)Dyu;
 
     double *R_mat_use = nullptr;
+
+#ifdef SOLVER_ENABLE_MERGED_BLOCKS
+    if (!(bflag & (1u << OCT_DIR_DOWN)) && !(bflag & (1u << OCT_DIR_UP))) {
+        R_mat_use = m_R_storage[ny][CompactDerivValueOrder::DERIV_NORM];
+    } else if ((bflag & (1u << OCT_DIR_DOWN)) &&
+               !(bflag & (1u << OCT_DIR_UP))) {
+        R_mat_use = m_R_storage[ny][CompactDerivValueOrder::DERIV_LEFT];
+    } else if (!(bflag & (1u << OCT_DIR_DOWN)) &&
+               (bflag & (1u << OCT_DIR_UP))) {
+        R_mat_use = m_R_storage[ny][CompactDerivValueOrder::DERIV_RIGHT];
+    } else {
+        R_mat_use = m_R_storage[ny][CompactDerivValueOrder::DERIV_LEFTRIGHT];
+    }
+#else
     // to reduce the number of checks, check for failing bflag first
     if (!(bflag & (1u << OCT_DIR_DOWN)) && !(bflag & (1u << OCT_DIR_UP))) {
         R_mat_use = m_RMatrices[CompactDerivValueOrder::DERIV_NORM];
@@ -719,6 +904,7 @@ void CompactFiniteDiff::cfd_y(double *const Dyu, const double *const u,
     } else {
         R_mat_use = m_RMatrices[CompactDerivValueOrder::DERIV_LEFTRIGHT];
     }
+#endif
 
 #if EM2_DEBUG_COMPACT_DERIVS_OFF
 
@@ -738,7 +924,7 @@ void CompactFiniteDiff::cfd_y(double *const Dyu, const double *const u,
         // thanks to memory layout, we can just... use this as a matrix
         // so we can just grab the "matrix" of ny x nx for this one
 
-        (*m_kernel_y)(R_mat_use, u_curr_chunk, m_du2d);
+        (*m_kernel_y)(R_mat_use, u_curr_chunk, m_du3d_block1);
 
 #else
 
@@ -752,22 +938,21 @@ void CompactFiniteDiff::cfd_y(double *const Dyu, const double *const u,
         }
 
 #endif
-
         dgemm_(&TRANSA, &TRANSB, &M, &N, &K, &alpha, R_mat_use, &M,
-               u_curr_chunk, &K, &beta, m_du2d, &M);
-
+               u_curr_chunk, &N, &beta, m_du3d_block1, &M);
 #endif
         // TODO: see if there's a faster way to copy (i.e. SSE?)
-        // the data is transposed so it's much harder to just copy all at once
+        // the data is transposed so it's much harder to just copy all at
+        // once
         for (unsigned int i = 0; i < nx; i++) {
             for (unsigned int j = 0; j < ny; j++) {
-                Dyu[INDEX_3D(i, j, k)] = m_du2d[j + i * ny];
+                Dyu[INDEX_3D(i, j, k)] = m_du3d_block1[j + i * ny];
             }
         }
 
-        // NOTE: this is probably faster on Intel, but for now we'll do the form
-        // above libxsmm_otrans(du_curr_chunk, m_du2d, sizeof(double), ny, nx,
-        // nx, ny);
+        // NOTE: this is probably faster on Intel, but for now we'll do the
+        // form above libxsmm_otrans(du_curr_chunk, m_du2d, sizeof(double),
+        // ny, nx, nx, ny);
         // TODO: mkl's mkl_domatcopy might be even better!
 
         // update u_curr_chunk
@@ -775,7 +960,8 @@ void CompactFiniteDiff::cfd_y(double *const Dyu, const double *const u,
         du_curr_chunk += nx * ny;
     }
 
-    // NOTE: it is currently faster for these derivatives if we calculate them
+    // NOTE: it is currently faster for these derivatives if we calculate
+    // them
 #ifdef EM2_USE_XSMM_MAT_MUL
     for (uint32_t ii = 0; ii < nx * ny * nz; ii++) {
         Dyu[ii] *= 1 / dy;
@@ -794,7 +980,8 @@ void CompactFiniteDiff::cfd_y(double *const Dyu, const double *const u,
                               << " line: " << __LINE__ << " (i, j, k): (" << i
                               << ", " << j << ", " << k
                               << ") bflag: " << std::bitset<8>(bflag)
-                              << std::endl;
+                              << " (nx, ny, nz): (" << nx << ", " << ny << ", "
+                              << nz << ")" << std::endl;
 
                     // then dump the original input matrix!
                     double *u_curr_chunk = (double *)u;
@@ -803,7 +990,7 @@ void CompactFiniteDiff::cfd_y(double *const Dyu, const double *const u,
                     for (unsigned int k = 0; k < nz; k++) {
                         std::cout << "k = " << k << std::endl;
 
-                        print_square_mat(u_curr_chunk, nx);
+                        print_nonsquare_mat(u_curr_chunk, ny, nx);
 
                         u_curr_chunk += nx * ny;
                     }
@@ -815,7 +1002,7 @@ void CompactFiniteDiff::cfd_y(double *const Dyu, const double *const u,
                     for (unsigned int k = 0; k < nz; k++) {
                         std::cout << "k = " << k << std::endl;
 
-                        print_square_mat(du_curr_chunk, nx);
+                        print_nonsquare_mat(du_curr_chunk, ny, nx);
 
                         du_curr_chunk += nx * ny;
                     }
@@ -859,7 +1046,8 @@ void CompactFiniteDiff::cfd_z(double *const Dzu, const double *const u,
                               << " file: " << __FILE__ << " line: " << __LINE__
                               << " (i, j, k): (" << i << ", " << j << ", " << k
                               << ") bflag: " << std::bitset<8>(bflag)
-                              << std::endl;
+                              << " (nx, ny, nz): (" << nx << ", " << ny << ", "
+                              << nz << ")" << std::endl;
                     MPI_Abort(MPI_COMM_WORLD, 1);
                 }
             }
@@ -875,6 +1063,20 @@ void CompactFiniteDiff::cfd_z(double *const Dzu, const double *const u,
     double beta = 0.0;
 
     double *R_mat_use = nullptr;
+
+#ifdef SOLVER_ENABLE_MERGED_BLOCKS
+    if (!(bflag & (1u << OCT_DIR_BACK)) && !(bflag & (1u << OCT_DIR_FRONT))) {
+        R_mat_use = m_R_storage[nz][CompactDerivValueOrder::DERIV_NORM];
+    } else if ((bflag & (1u << OCT_DIR_BACK)) &&
+               !(bflag & (1u << OCT_DIR_FRONT))) {
+        R_mat_use = m_R_storage[nz][CompactDerivValueOrder::DERIV_LEFT];
+    } else if (!(bflag & (1u << OCT_DIR_BACK)) &&
+               (bflag & (1u << OCT_DIR_FRONT))) {
+        R_mat_use = m_R_storage[nz][CompactDerivValueOrder::DERIV_RIGHT];
+    } else {
+        R_mat_use = m_R_storage[nz][CompactDerivValueOrder::DERIV_LEFTRIGHT];
+    }
+#else
     // to reduce the number of checks, check for failing bflag first
     if (!(bflag & (1u << OCT_DIR_BACK)) && !(bflag & (1u << OCT_DIR_FRONT))) {
         R_mat_use = m_RMatrices[CompactDerivValueOrder::DERIV_NORM];
@@ -887,6 +1089,7 @@ void CompactFiniteDiff::cfd_z(double *const Dzu, const double *const u,
     } else {
         R_mat_use = m_RMatrices[CompactDerivValueOrder::DERIV_LEFTRIGHT];
     }
+#endif
 
 #if EM2_DEBUG_COMPACT_DERIVS_OFF
 
@@ -910,20 +1113,13 @@ void CompactFiniteDiff::cfd_z(double *const Dzu, const double *const u,
     for (unsigned int j = 0; j < ny; j++) {
         for (unsigned int k = 0; k < nz; k++) {
             // copy the slice of X values over
-            std::copy_n(&u[INDEX_3D(0, j, k)], nx, &m_u2d[INDEX_N2D(0, k, nx)]);
+            std::copy_n(&u[INDEX_3D(0, j, k)], nx,
+                        &m_du3d_block1[INDEX_N2D(0, k, nx)]);
         }
 
 #ifdef EM2_USE_XSMM_MAT_MUL
         // now do the faster math multiplcation
-        (*m_kernel_z)(R_mat_use, m_u2d, m_du2d);
-
-        // then we just stick it back in, but now in memory it's stored as z0,
-        // z1, z2,... then increases in x so we can't just do copy_n
-        for (unsigned int i = 0; i < nx; i++) {
-            for (unsigned int k = 0; k < nz; k++) {
-                Dzu[INDEX_3D(i, j, k)] = m_du2d[k + i * nz];
-            }
-        }
+        (*m_kernel_z)(R_mat_use, m_du3d_block1, m_du3d_block2);
 
 #else
 
@@ -931,7 +1127,7 @@ void CompactFiniteDiff::cfd_z(double *const Dzu, const double *const u,
 
         if ((bflag & (1u << OCT_DIR_DOWN)) || (bflag & (1u << OCT_DIR_UP))) {
             std::cout << "here's the u_curr_chunk:" << std::endl;
-            print_square_mat(m_u2d, nz);
+            print_nonsquare_mat(m_du3d_block1, nx, nz);
 
             std::cout << std::endl;
         }
@@ -939,8 +1135,8 @@ void CompactFiniteDiff::cfd_z(double *const Dzu, const double *const u,
 #endif
 
         // now we have a transposed matrix to send into dgemm_
-        dgemm_(&TRANSA, &TRANSB, &M, &N, &K, &alpha, R_mat_use, &M, m_u2d, &K,
-               &beta, m_du2d, &M);
+        dgemm_(&TRANSA, &TRANSB, &M, &N, &K, &alpha, R_mat_use, &M,
+               m_du3d_block1, &N, &beta, m_du3d_block2, &M);
 
 #ifdef EM2_DEBUG_COMPACT_DERIVS_OFF
 
@@ -955,14 +1151,15 @@ void CompactFiniteDiff::cfd_z(double *const Dzu, const double *const u,
 
         for (unsigned int i = 0; i < nx; i++) {
             for (unsigned int k = 0; k < nz; k++) {
-                Dzu[INDEX_3D(i, j, k)] = m_du2d[k + i * nz];
+                Dzu[INDEX_3D(i, j, k)] = m_du3d_block2[k + i * nz];
             }
         }
 
 #endif
     }
 
-    // NOTE: it is currently faster for these derivatives if we calculate them
+    // NOTE: it is currently faster for these derivatives if we calculate
+    // them
 #ifdef EM2_USE_XSMM_MAT_MUL
     for (uint32_t ii = 0; ii < nx * ny * nz; ii++) {
         Dzu[ii] *= 1 / dz;
@@ -981,7 +1178,8 @@ void CompactFiniteDiff::cfd_z(double *const Dzu, const double *const u,
                               << " line: " << __LINE__ << " (i, j, k): (" << i
                               << ", " << j << ", " << k
                               << ") bflag: " << std::bitset<8>(bflag)
-                              << std::endl;
+                              << " (nx, ny, nz): (" << nx << ", " << ny << ", "
+                              << nz << ")" << std::endl;
 
                     // then dump the original input matrix!
                     double *u_curr_chunk = (double *)u;
@@ -990,7 +1188,7 @@ void CompactFiniteDiff::cfd_z(double *const Dzu, const double *const u,
                     for (unsigned int k = 0; k < nz; k++) {
                         std::cout << "k = " << k << std::endl;
 
-                        print_square_mat(u_curr_chunk, nx);
+                        print_nonsquare_mat(u_curr_chunk, ny, nx);
 
                         u_curr_chunk += nx * ny;
                     }
@@ -1002,7 +1200,7 @@ void CompactFiniteDiff::cfd_z(double *const Dzu, const double *const u,
                     for (unsigned int k = 0; k < nz; k++) {
                         std::cout << "k = " << k << std::endl;
 
-                        print_square_mat(du_curr_chunk, nx);
+                        print_nonsquare_mat(du_curr_chunk, ny, nx);
 
                         du_curr_chunk += nx * ny;
                     }
@@ -1022,25 +1220,21 @@ void CompactFiniteDiff::cfd_xx(double *const Dxu, const double *const u,
     const unsigned int ny = sz[1];
     const unsigned int nz = sz[2];
 
-    // std::cout << "Nx, ny, nz: " << nx << " " << ny << " " << nz << std::endl;
+    // std::cout << "Nx, ny, nz: " << nx << " " << ny << " " << nz <<
+    // std::endl;
 
     char TRANSA = 'N';
     char TRANSB = 'N';
 
     int M = nx;
     int N = ny;
+    int K = nx;
+    // NOTE: LDA = M, LDB = K, and LDC = M
 #ifdef EM2_USE_XSMM_MAT_MUL
     const double alpha = 1.0 / (dx * dx);
 #else
     double alpha = 1.0 / (dx * dx);
 #endif
-    int K = nx;
-
-    // NOTE: LDA, LDB, and LDC should be nx, ny, and nz
-    // TODO: fix for non-square sizes
-    int LDA = nx;
-    int LDB = ny;
-    int LDC = nx;
 
     double *u_curr_chunk = (double *)u;
     double *du_curr_chunk = (double *)Dxu;
@@ -1049,6 +1243,21 @@ void CompactFiniteDiff::cfd_xx(double *const Dxu, const double *const u,
 
     double *R_mat_use = nullptr;
 
+#ifdef SOLVER_ENABLE_MERGED_BLOCKS
+    if (!(bflag & (1u << OCT_DIR_LEFT)) && !(bflag & (1u << OCT_DIR_RIGHT))) {
+        R_mat_use = m_R_storage[nx][CompactDerivValueOrder::DERIV_2ND_NORM];
+    } else if ((bflag & (1u << OCT_DIR_LEFT)) &&
+               !(bflag & (1u << OCT_DIR_RIGHT))) {
+        R_mat_use = m_R_storage[nx][CompactDerivValueOrder::DERIV_2ND_LEFT];
+    } else if (!(bflag & (1u << OCT_DIR_LEFT)) &&
+               (bflag & (1u << OCT_DIR_RIGHT))) {
+        R_mat_use = m_R_storage[nx][CompactDerivValueOrder::DERIV_2ND_RIGHT];
+    } else {
+        R_mat_use =
+            m_R_storage[nx][CompactDerivValueOrder::DERIV_2ND_LEFTRIGHT];
+        printf("Uh oh, DERIV_2ND_LEFTRIGHT was reached!");
+    }
+#else
     // to reduce the number of checks, check for failing bflag first
     if (!(bflag & (1u << OCT_DIR_LEFT)) && !(bflag & (1u << OCT_DIR_RIGHT))) {
         R_mat_use = m_RMatrices[CompactDerivValueOrder::DERIV_2ND_NORM];
@@ -1062,10 +1271,11 @@ void CompactFiniteDiff::cfd_xx(double *const Dxu, const double *const u,
         R_mat_use = m_RMatrices[CompactDerivValueOrder::DERIV_2ND_LEFTRIGHT];
         printf("Uh oh, DERIV_2ND_LEFTRIGHT was reached!");
     }
+#endif
 
     // const libxsmm_mmfunction<double, double, LIBXSMM_PREFETCH_AUTO>
-    // xmm(LIBXSMM_GEMM_FLAGS(TRANSA, TRANSB), M, N, K, LDA, LDB, LDC, alpha,
-    // beta);
+    // xmm(LIBXSMM_GEMM_FLAGS(TRANSA, TRANSB), M, N, K, LDA, LDB, LDC,
+    // alpha, beta);
 
     for (unsigned int k = 0; k < nz; k++) {
 #ifdef EM2_USE_XSMM_MAT_MUL
@@ -1081,8 +1291,8 @@ void CompactFiniteDiff::cfd_xx(double *const Dxu, const double *const u,
 
 #else
 
-        dgemm_(&TRANSA, &TRANSB, &M, &N, &K, &alpha, R_mat_use, &LDA,
-               u_curr_chunk, &LDB, &beta, du_curr_chunk, &LDC);
+        dgemm_(&TRANSA, &TRANSB, &M, &N, &K, &alpha, R_mat_use, &M,
+               u_curr_chunk, &K, &beta, du_curr_chunk, &M);
 
 #endif
 
@@ -1129,6 +1339,8 @@ void CompactFiniteDiff::cfd_yy(double *const Dyu, const double *const u,
     int M = ny;
     int N = nx;
     int K = ny;
+    // NOTE: LDA = M, LDB = N, and LDC = M
+    // LDB is N because in memory, Y is transposed!
 
     double alpha = 1.0 / (dy * dy);
     double beta = 0.0;
@@ -1137,6 +1349,22 @@ void CompactFiniteDiff::cfd_yy(double *const Dyu, const double *const u,
     double *du_curr_chunk = (double *)Dyu;
 
     double *R_mat_use = nullptr;
+
+#ifdef SOLVER_ENABLE_MERGED_BLOCKS
+    if (!(bflag & (1u << OCT_DIR_DOWN)) && !(bflag & (1u << OCT_DIR_UP))) {
+        R_mat_use = m_R_storage[ny][CompactDerivValueOrder::DERIV_2ND_NORM];
+    } else if ((bflag & (1u << OCT_DIR_DOWN)) &&
+               !(bflag & (1u << OCT_DIR_UP))) {
+        R_mat_use = m_R_storage[ny][CompactDerivValueOrder::DERIV_2ND_LEFT];
+    } else if (!(bflag & (1u << OCT_DIR_DOWN)) &&
+               (bflag & (1u << OCT_DIR_UP))) {
+        R_mat_use = m_R_storage[ny][CompactDerivValueOrder::DERIV_2ND_RIGHT];
+    } else {
+        R_mat_use =
+            m_R_storage[ny][CompactDerivValueOrder::DERIV_2ND_LEFTRIGHT];
+        printf("Uh oh, DERIV_2ND_LEFTRIGHT was reached!");
+    }
+#else
     // to reduce the number of checks, check for failing bflag first
     if (!(bflag & (1u << OCT_DIR_DOWN)) && !(bflag & (1u << OCT_DIR_UP))) {
         R_mat_use = m_RMatrices[CompactDerivValueOrder::DERIV_2ND_NORM];
@@ -1150,31 +1378,34 @@ void CompactFiniteDiff::cfd_yy(double *const Dyu, const double *const u,
         R_mat_use = m_RMatrices[CompactDerivValueOrder::DERIV_2ND_LEFTRIGHT];
         printf("Uh oh, DERIV_2ND_LEFTRIGHT was reached!");
     }
+#endif
 
     for (unsigned int k = 0; k < nz; k++) {
 #ifdef EM2_USE_XSMM_MAT_MUL
         // thanks to memory layout, we can just... use this as a matrix
         // so we can just grab the "matrix" of ny x nx for this one
 
-        (*m_kernel_y)(R_mat_use, u_curr_chunk, m_du2d);
+        (*m_kernel_y)(R_mat_use, u_curr_chunk, m_du3d_block1);
 
 #else
 
         dgemm_(&TRANSA, &TRANSB, &M, &N, &K, &alpha, R_mat_use, &M,
-               u_curr_chunk, &K, &beta, m_du2d, &M);
+               u_curr_chunk, &N, &beta, m_du3d_block1, &M);
 
 #endif
         // TODO: see if there's a faster way to copy (i.e. SSE?)
-        // the data is transposed so it's much harder to just copy all at once
+        // the data is transposed so it's much harder to just copy all at
+        // once
+        // Could also do this after for batched matrix multiplication
         for (unsigned int i = 0; i < nx; i++) {
             for (unsigned int j = 0; j < ny; j++) {
-                Dyu[INDEX_3D(i, j, k)] = m_du2d[j + i * ny];
+                Dyu[INDEX_3D(i, j, k)] = m_du3d_block1[j + i * ny];
             }
         }
 
-        // NOTE: this is probably faster on Intel, but for now we'll do the form
-        // above libxsmm_otrans(du_curr_chunk, m_du2d, sizeof(double), ny, nx,
-        // nx, ny);
+        // NOTE: this is probably faster on Intel, but for now we'll do the
+        // form above libxsmm_otrans(du_curr_chunk, m_du2d, sizeof(double),
+        // ny, nx, nx, ny);
         // TODO: mkl's mkl_domatcopy might be even better!
 
         // update u_curr_chunk
@@ -1182,7 +1413,8 @@ void CompactFiniteDiff::cfd_yy(double *const Dyu, const double *const u,
         du_curr_chunk += nx * ny;
     }
 
-    // NOTE: it is currently faster for these derivatives if we calculate them
+    // NOTE: it is currently faster for these derivatives if we calculate
+    // them
 #ifdef EM2_USE_XSMM_MAT_MUL
     for (uint32_t ii = 0; ii < nx * ny * nz; ii++) {
         Dyu[ii] *= alpha;
@@ -1221,6 +1453,22 @@ void CompactFiniteDiff::cfd_zz(double *const Dzu, const double *const u,
     double beta = 0.0;
 
     double *R_mat_use = nullptr;
+
+#ifdef SOLVER_ENABLE_MERGED_BLOCKS
+    if (!(bflag & (1u << OCT_DIR_BACK)) && !(bflag & (1u << OCT_DIR_FRONT))) {
+        R_mat_use = m_R_storage[nz][CompactDerivValueOrder::DERIV_2ND_NORM];
+    } else if ((bflag & (1u << OCT_DIR_BACK)) &&
+               !(bflag & (1u << OCT_DIR_FRONT))) {
+        R_mat_use = m_R_storage[nz][CompactDerivValueOrder::DERIV_2ND_LEFT];
+    } else if (!(bflag & (1u << OCT_DIR_BACK)) &&
+               (bflag & (1u << OCT_DIR_FRONT))) {
+        R_mat_use = m_R_storage[nz][CompactDerivValueOrder::DERIV_2ND_RIGHT];
+    } else {
+        R_mat_use =
+            m_R_storage[nz][CompactDerivValueOrder::DERIV_2ND_LEFTRIGHT];
+        printf("Uh oh, DERIV_2ND_LEFTRIGHT was reached!");
+    }
+#else
     // to reduce the number of checks, check for failing bflag first
     if (!(bflag & (1u << OCT_DIR_BACK)) && !(bflag & (1u << OCT_DIR_FRONT))) {
         R_mat_use = m_RMatrices[CompactDerivValueOrder::DERIV_2ND_NORM];
@@ -1234,6 +1482,7 @@ void CompactFiniteDiff::cfd_zz(double *const Dzu, const double *const u,
         R_mat_use = m_RMatrices[CompactDerivValueOrder::DERIV_2ND_LEFTRIGHT];
         printf("Uh oh, DERIV_2ND_LEFTRIGHT was reached!");
     }
+#endif
 
 #ifdef EM2_USE_XSMM_MAT_MUL
     int N = nx;
@@ -1244,37 +1493,31 @@ void CompactFiniteDiff::cfd_zz(double *const Dzu, const double *const u,
     for (unsigned int j = 0; j < ny; j++) {
         for (unsigned int k = 0; k < nz; k++) {
             // copy slice of X values over
-            std::copy_n(&u[INDEX_3D(0, j, k)], nx, &m_u2d[INDEX_N2D(0, k, nx)]);
+            std::copy_n(&u[INDEX_3D(0, j, k)], nx,
+                        &m_du3d_block1[INDEX_N2D(0, k, nx)]);
         }
 #ifdef EM2_USE_XSMM_MAT_MUL
 
         // now do the faster math multiplcation
-        (*m_kernel_z)(R_mat_use, m_u2d, m_du2d);
-
-        // then we just stick it back in, but now in memory it's stored as z0,
-        // z1, z2,... then increases in x so we can't just do copy_n
-        for (unsigned int i = 0; i < nx; i++) {
-            for (unsigned int k = 0; k < nz; k++) {
-                Dzu[INDEX_3D(i, j, k)] = m_du2d[k + i * nz];
-            }
-        }
+        (*m_kernel_z)(R_mat_use, m_du3d_block1, m_du3d_block2);
 
 #else
 
         // now we have a transposed matrix to send into dgemm_
-        dgemm_(&TRANSA, &TRANSB, &M, &N, &K, &alpha, R_mat_use, &M, m_u2d, &K,
-               &beta, m_du2d, &M);
+        dgemm_(&TRANSA, &TRANSB, &M, &N, &K, &alpha, R_mat_use, &M,
+               m_du3d_block1, &N, &beta, m_du3d_block2, &M);
+
+#endif
 
         for (unsigned int i = 0; i < nx; i++) {
             for (unsigned int k = 0; k < nz; k++) {
-                Dzu[INDEX_3D(i, j, k)] = m_du2d[k + i * nz];
+                Dzu[INDEX_3D(i, j, k)] = m_du3d_block2[k + i * nz];
             }
         }
-
-#endif
     }
 
-    // NOTE: it is currently faster for these derivatives if we calculate them
+    // NOTE: it is currently faster for these derivatives if we calculate
+    // them
 #ifdef EM2_USE_XSMM_MAT_MUL
     for (uint32_t ii = 0; ii < nx * ny * nz; ii++) {
         Dzu[ii] *= alpha;
@@ -1321,21 +1564,31 @@ void CompactFiniteDiff::filter_cfd_x(double *const u, double *const filtx_work,
     int M = nx;
     int N = ny;
     int K = nx;
-
-    // NOTE: LDA, LDB, and LDC should be nx, ny, and nz
-    // TODO: fix for non-square sizes
-    int LDA = nx;
-    int LDB = ny;
-    int LDC = nx;
+    // NOTE: LDA = M, LDB = K, and LDC = M
 
     double *u_curr_chunk = (double *)u;
     double *filtu_curr_chunk = (double *)filtx_work;
 
-    // the alphas here should always be 1.0, there's no additional computation
+    // the alphas here should always be 1.0, there's no additional
+    // computation
     double alpha = 1.0;
 
     double *RF_mat_use = nullptr;
 
+#ifdef SOLVER_ENABLE_MERGED_BLOCKS
+    if (!(bflag & (1u << OCT_DIR_LEFT)) && !(bflag & (1u << OCT_DIR_RIGHT))) {
+        RF_mat_use = m_R_storage[nx][CompactDerivValueOrder::FILT_NORM];
+    } else if ((bflag & (1u << OCT_DIR_LEFT)) &&
+               !(bflag & (1u << OCT_DIR_RIGHT))) {
+        RF_mat_use = m_R_storage[nx][CompactDerivValueOrder::FILT_LEFT];
+    } else if (!(bflag & (1u << OCT_DIR_LEFT)) &&
+               (bflag & (1u << OCT_DIR_RIGHT))) {
+        RF_mat_use = m_R_storage[nx][CompactDerivValueOrder::FILT_RIGHT];
+
+    } else {
+        RF_mat_use = m_R_storage[nx][CompactDerivValueOrder::FILT_LEFTRIGHT];
+    }
+#else
     // to reduce the number of checks, check for failing bflag first
     if (!(bflag & (1u << OCT_DIR_LEFT)) && !(bflag & (1u << OCT_DIR_RIGHT))) {
         RF_mat_use = m_RMatrices[CompactDerivValueOrder::FILT_NORM];
@@ -1349,6 +1602,7 @@ void CompactFiniteDiff::filter_cfd_x(double *const u, double *const filtx_work,
     } else {
         RF_mat_use = m_RMatrices[CompactDerivValueOrder::FILT_LEFTRIGHT];
     }
+#endif
 
     for (unsigned int k = 0; k < nx; k++) {
 #ifdef EM2_USE_XSMM_MAT_MUL
@@ -1361,8 +1615,8 @@ void CompactFiniteDiff::filter_cfd_x(double *const u, double *const filtx_work,
         (*m_kernel_x_filt)(RF_mat_use, u_curr_chunk, filtu_curr_chunk);
 
 #else
-        dgemm_(&TRANSA, &TRANSB, &M, &N, &K, &alpha, RF_mat_use, &LDA,
-               u_curr_chunk, &LDB, &m_beta_filt, filtu_curr_chunk, &LDC);
+        dgemm_(&TRANSA, &TRANSB, &M, &N, &K, &alpha, RF_mat_use, &M,
+               u_curr_chunk, &K, &m_beta_filt, filtu_curr_chunk, &M);
 
 #endif
         u_curr_chunk += nx * ny;
@@ -1392,12 +1646,29 @@ void CompactFiniteDiff::filter_cfd_y(double *const u, double *const filty_work,
     int M = ny;
     int N = nx;
     int K = ny;
+    // NOTE: LDA = M, LDB = N, and LDC = M
+    // LDB is N because in memory, Y is transposed!
+
     double alpha = 1.0;
 
     double *u_curr_chunk = (double *)u;
     double *filtu_curr_chunk = (double *)filty_work;
 
     double *RF_mat_use = nullptr;
+
+#ifdef SOLVER_ENABLE_MERGED_BLOCKS
+    if (!(bflag & (1u << OCT_DIR_DOWN)) && !(bflag & (1u << OCT_DIR_UP))) {
+        RF_mat_use = m_R_storage[ny][CompactDerivValueOrder::FILT_NORM];
+    } else if ((bflag & (1u << OCT_DIR_DOWN)) &&
+               !(bflag & (1u << OCT_DIR_UP))) {
+        RF_mat_use = m_R_storage[ny][CompactDerivValueOrder::FILT_LEFT];
+    } else if (!(bflag & (1u << OCT_DIR_DOWN)) &&
+               (bflag & (1u << OCT_DIR_UP))) {
+        RF_mat_use = m_R_storage[ny][CompactDerivValueOrder::FILT_RIGHT];
+    } else {
+        RF_mat_use = m_R_storage[ny][CompactDerivValueOrder::FILT_LEFTRIGHT];
+    }
+#else
     // to reduce the number of checks, check for failing bflag first
     if (!(bflag & (1u << OCT_DIR_DOWN)) && !(bflag & (1u << OCT_DIR_UP))) {
         RF_mat_use = m_RMatrices[CompactDerivValueOrder::FILT_NORM];
@@ -1410,6 +1681,7 @@ void CompactFiniteDiff::filter_cfd_y(double *const u, double *const filty_work,
     } else {
         RF_mat_use = m_RMatrices[CompactDerivValueOrder::FILT_LEFTRIGHT];
     }
+#endif
 
     for (unsigned int k = 0; k < nz; k++) {
         if (m_filter_type == FilterType::FILT_KIM_6) {
@@ -1429,13 +1701,14 @@ void CompactFiniteDiff::filter_cfd_y(double *const u, double *const filty_work,
 
 #else
         dgemm_(&TRANSA, &TRANSB, &M, &N, &K, &alpha, RF_mat_use, &M,
-               u_curr_chunk, &K, &m_beta_filt, filty_work, &M);
+               u_curr_chunk, &N, &m_beta_filt, filty_work, &M);
 
 #endif
 
         // then transpose right back
         // TODO: see if there's a faster way to copy (i.e. SSE?)
-        // the data is transposed so it's much harder to just copy all at once
+        // the data is transposed so it's much harder to just copy all at
+        // once
         for (unsigned int i = 0; i < nx; i++) {
             for (unsigned int j = 0; j < ny; j++) {
                 // u[INDEX_3D(i, j, k)] += filty_work[j + i * ny];
@@ -1464,6 +1737,20 @@ void CompactFiniteDiff::filter_cfd_z(double *const u, double *const filtz_work,
     double alpha = 1.0;
 
     double *RF_mat_use = nullptr;
+
+#ifdef SOLVER_ENABLE_MERGED_BLOCKS
+    if (!(bflag & (1u << OCT_DIR_BACK)) && !(bflag & (1u << OCT_DIR_FRONT))) {
+        RF_mat_use = m_R_storage[nz][CompactDerivValueOrder::FILT_NORM];
+    } else if ((bflag & (1u << OCT_DIR_BACK)) &&
+               !(bflag & (1u << OCT_DIR_FRONT))) {
+        RF_mat_use = m_R_storage[nz][CompactDerivValueOrder::FILT_LEFT];
+    } else if (!(bflag & (1u << OCT_DIR_BACK)) &&
+               (bflag & (1u << OCT_DIR_FRONT))) {
+        RF_mat_use = m_R_storage[nz][CompactDerivValueOrder::FILT_RIGHT];
+    } else {
+        RF_mat_use = m_R_storage[nz][CompactDerivValueOrder::FILT_LEFTRIGHT];
+    }
+#else
     // to reduce the number of checks, check for failing bflag first
     if (!(bflag & (1u << OCT_DIR_BACK)) && !(bflag & (1u << OCT_DIR_FRONT))) {
         RF_mat_use = m_RMatrices[CompactDerivValueOrder::FILT_NORM];
@@ -1476,6 +1763,7 @@ void CompactFiniteDiff::filter_cfd_z(double *const u, double *const filtz_work,
     } else {
         RF_mat_use = m_RMatrices[CompactDerivValueOrder::FILT_LEFTRIGHT];
     }
+#endif
 
 #ifdef EM2_USE_XSMM_MAT_MUL
     int N = nx;
@@ -1486,7 +1774,8 @@ void CompactFiniteDiff::filter_cfd_z(double *const u, double *const filtz_work,
     for (unsigned int j = 0; j < ny; j++) {
         for (unsigned int k = 0; k < nz; k++) {
             // copy slice of X values over
-            std::copy_n(&u[INDEX_3D(0, j, k)], nx, &m_u2d[INDEX_N2D(0, k, nx)]);
+            std::copy_n(&u[INDEX_3D(0, j, k)], nx,
+                        &m_du3d_block1[INDEX_N2D(0, k, nx)]);
             // std::copy_n(&u[INDEX_3D(0, j, k)], nx,
             //             &m_du2d[INDEX_N2D(0, k, nx)]);
         }
@@ -1495,7 +1784,7 @@ void CompactFiniteDiff::filter_cfd_z(double *const u, double *const filtz_work,
             // then we need to copy in m_u2d to m_du2d but transposed
             for (unsigned int i = 0; i < nx; i++) {
                 for (unsigned int k = 0; k < nz; k++) {
-                    m_du2d[k + i * nz] = m_u2d[i + k * nx];
+                    filtz_work[k + i * nz] = m_du3d_block1[i + k * nx];
                 }
             }
         }
@@ -1505,8 +1794,8 @@ void CompactFiniteDiff::filter_cfd_z(double *const u, double *const filtz_work,
         // now do the faster math multiplcation
         (*m_kernel_z_filt)(RF_mat_use, m_u2d, m_du2d);
 
-        // then we just stick it back in, but now in memory it's stored as z0,
-        // z1, z2,... then increases in x so we can't just do copy_n
+        // then we just stick it back in, but now in memory it's stored as
+        // z0, z1, z2,... then increases in x so we can't just do copy_n
         for (unsigned int i = 0; i < nx; i++) {
             for (unsigned int k = 0; k < nz; k++) {
                 u[INDEX_3D(i, j, k)] = m_du2d[k + i * nz];
@@ -1514,12 +1803,12 @@ void CompactFiniteDiff::filter_cfd_z(double *const u, double *const filtz_work,
         }
 #else
 
-        dgemm_(&TRANSA, &TRANSB, &M, &N, &K, &alpha, RF_mat_use, &M, m_u2d, &K,
-               &m_beta_filt, m_du2d, &M);
+        dgemm_(&TRANSA, &TRANSB, &M, &N, &K, &alpha, RF_mat_use, &M,
+               m_du3d_block1, &N, &m_beta_filt, filtz_work, &M);
 
         for (unsigned int i = 0; i < nx; i++) {
             for (unsigned int k = 0; k < nz; k++) {
-                u[INDEX_3D(i, j, k)] = m_du2d[k + i * nz];
+                u[INDEX_3D(i, j, k)] = filtz_work[k + i * nz];
             }
         }
 #endif
@@ -1625,8 +1914,8 @@ void buildPandQMatrices(double *P, double *Q, const uint32_t padding,
     // are treated equally. We only need to account for physical "left" and
     // "right" edges
 
-    // NOTE: (2) we're also assuming that P and Q are initialized to **zero**.
-    // There are no guarantees in this function if they are not.
+    // NOTE: (2) we're also assuming that P and Q are initialized to
+    // **zero**. There are no guarantees in this function if they are not.
     // std::cout << derivtype << " is the deriv type" << std::endl;
 
     uint32_t curr_n = n;
@@ -1660,8 +1949,8 @@ void buildPandQMatrices(double *P, double *Q, const uint32_t padding,
     // std::cout << "i : " << i_start << " " << i_end << std::endl;
     // std::cout << "j : " << j_start << " " << j_end << std::endl;
 
-    // NOTE: when at the "edges", we need a temporary array that can be copied
-    // over
+    // NOTE: when at the "edges", we need a temporary array that can be
+    // copied over
     double *tempP = nullptr;
     double *tempQ = nullptr;
 
@@ -1670,7 +1959,8 @@ void buildPandQMatrices(double *P, double *Q, const uint32_t padding,
         tempP = new double[curr_n * curr_n]();
         tempQ = new double[curr_n * curr_n]();
     } else {
-        // just use the same pointer value, then no need to adjust later even
+        // just use the same pointer value, then no need to adjust later
+        // even
         tempP = P;
         tempQ = Q;
     }
@@ -1693,7 +1983,8 @@ void buildPandQMatrices(double *P, double *Q, const uint32_t padding,
             leftEdgeDtype = getDerTypeForEdges(
                 derivtype, BoundaryType::BLOCK_PHYS_BOUNDARY);
         } else {
-            // TODO: update the boundary type based on what we want to build in
+            // TODO: update the boundary type based on what we want to build
+            // in
             leftEdgeDtype = getDerTypeForEdges(derivtype, boundary_type);
         }
 
@@ -1701,13 +1992,14 @@ void buildPandQMatrices(double *P, double *Q, const uint32_t padding,
             rightEdgeDtype = getDerTypeForEdges(
                 derivtype, BoundaryType::BLOCK_PHYS_BOUNDARY);
         } else {
-            // TODO: update the boundary type based on what we want to build in
+            // TODO: update the boundary type based on what we want to build
+            // in
             rightEdgeDtype = getDerTypeForEdges(derivtype, boundary_type);
         }
 
-        std::cout << "LEFT EDGE TYPE, RIGHT EDGE TYPE "
-                  << DER_TYPE_NAMES[leftEdgeDtype + 1] << " "
-                  << DER_TYPE_NAMES[rightEdgeDtype + 1] << std::endl;
+        // std::cout << "LEFT EDGE TYPE, RIGHT EDGE TYPE "
+        //           << DER_TYPE_NAMES[leftEdgeDtype + 1] << " "
+        //           << DER_TYPE_NAMES[rightEdgeDtype + 1] << std::endl;
 
         buildMatrixLeft(tempP, tempQ, &ibgn, leftEdgeDtype, padding, curr_n);
         buildMatrixRight(tempP, tempQ, &iend, rightEdgeDtype, padding, curr_n);
@@ -1720,7 +2012,8 @@ void buildPandQMatrices(double *P, double *Q, const uint32_t padding,
                         delete[] tempQ;
                     }
                     throw std::out_of_range(
-                        "I is either less than zero or greater than curr_n! "
+                        "I is either less than zero or greater than "
+                        "curr_n! "
                         "i=" +
                         std::to_string(i) +
                         " curr_n=" + std::to_string(curr_n));
@@ -1731,7 +2024,8 @@ void buildPandQMatrices(double *P, double *Q, const uint32_t padding,
                         delete[] tempQ;
                     }
                     throw std::out_of_range(
-                        "i + k is either less than 1 or greater than curr_n! "
+                        "i + k is either less than 1 or greater than "
+                        "curr_n! "
                         "i=" +
                         std::to_string(i + k) + " k=" + std::to_string(k) +
                         " curr_n=" + std::to_string(curr_n));
@@ -1743,14 +2037,16 @@ void buildPandQMatrices(double *P, double *Q, const uint32_t padding,
             for (int k = -method.Lf; k <= method.Rf; k++) {
                 if (!(i > -1) && !(i < curr_n)) {
                     throw std::out_of_range(
-                        "(i is either less than zero or greater than curr_n! "
+                        "(i is either less than zero or greater than "
+                        "curr_n! "
                         "i=" +
                         std::to_string(i) +
                         " curr_n=" + std::to_string(curr_n));
                 }
                 if (!((i + k) > -1) && !((i + k) < curr_n)) {
                     throw std::out_of_range(
-                        "i + k is either less than 1 or greater than curr_n! "
+                        "i + k is either less than 1 or greater than "
+                        "curr_n! "
                         "i=" +
                         std::to_string(i + k) + " k=" + std::to_string(k) +
                         " curr_n=" + std::to_string(curr_n));
@@ -1790,24 +2086,26 @@ void buildPandQMatrices(double *P, double *Q, const uint32_t padding,
             delete[] tempQ;
         }
         throw std::invalid_argument(
-            "The CFD deriv type was not one of the valid options. derivtype=" +
+            "The CFD deriv type was not one of the valid options. "
+            "derivtype=" +
             std::to_string(derivtype));
     }
 
     // copy the values back in
-    // NOTE: the use of j and i assumes ROW-MAJOR order, but it will just copy a
-    // square matrix in no matter what, so it's not a big issue
+    // NOTE: the use of j and i assumes ROW-MAJOR order, but it will just
+    // copy a square matrix in no matter what, so it's not a big issue
     if (is_left_edge or is_right_edge) {
         // then memcopy the "chunks" to where they go inside the matrix
         uint32_t temp_arr_i = 0;
         // iterate over the rows
         for (uint32_t jj = j_start; jj < j_end; jj++) {
             // ii will only go from empty rows we actually need to fill...
-            // j will start at "j_start" and go until "j_end" where we need to
-            // fill memory start index of our main array
+            // j will start at "j_start" and go until "j_end" where we need
+            // to fill memory start index of our main array
 
             uint32_t temp_start = INDEX_N2D(0, temp_arr_i, curr_n);
-            // uint32_t temp_end = INDEX_N2D(curr_n - 1, temp_arr_i, curr_n);
+            // uint32_t temp_end = INDEX_N2D(curr_n - 1, temp_arr_i,
+            // curr_n);
 
             std::copy_n(&tempP[temp_start], curr_n, &P[INDEX_2D(i_start, jj)]);
             std::copy_n(&tempQ[temp_start], curr_n, &Q[INDEX_2D(i_start, jj)]);
@@ -1820,7 +2118,8 @@ void buildPandQMatrices(double *P, double *Q, const uint32_t padding,
         delete[] tempQ;
     }
     // NOTE: tempP doesn't need to be deleted if it was not initialized,
-    // so we don't need to delete it unless we're dealing with left/right edges
+    // so we don't need to delete it unless we're dealing with left/right
+    // edges
 }
 
 void buildPandQMatrices2ndOrder(double *P, double *Q, const uint32_t padding,
@@ -1832,8 +2131,8 @@ void buildPandQMatrices2ndOrder(double *P, double *Q, const uint32_t padding,
     // are treated equally. We only need to account for physical "left" and
     // "right" edges
 
-    // NOTE: (2) we're also assuming that P and Q are initialized to **zero**.
-    // There are no guarantees in this function if they are not.
+    // NOTE: (2) we're also assuming that P and Q are initialized to
+    // **zero**. There are no guarantees in this function if they are not.
     // std::cout << derivtype << " is the deriv type" << std::endl;
 
     uint32_t curr_n = n;
@@ -1864,11 +2163,11 @@ void buildPandQMatrices2ndOrder(double *P, double *Q, const uint32_t padding,
         curr_n -= padding;
     }
 
-    std::cout << "i : " << i_start << " " << i_end << std::endl;
-    std::cout << "j : " << j_start << " " << j_end << std::endl;
+    // std::cout << "i : " << i_start << " " << i_end << std::endl;
+    // std::cout << "j : " << j_start << " " << j_end << std::endl;
 
-    // NOTE: when at the "edges", we need a temporary array that can be copied
-    // over
+    // NOTE: when at the "edges", we need a temporary array that can be
+    // copied over
     double *tempP = nullptr;
     double *tempQ = nullptr;
 
@@ -1877,7 +2176,8 @@ void buildPandQMatrices2ndOrder(double *P, double *Q, const uint32_t padding,
         tempP = new double[curr_n * curr_n]();
         tempQ = new double[curr_n * curr_n]();
     } else {
-        // just use the same pointer value, then no need to adjust later even
+        // just use the same pointer value, then no need to adjust later
+        // even
         tempP = P;
         tempQ = Q;
     }
@@ -1908,7 +2208,8 @@ void buildPandQMatrices2ndOrder(double *P, double *Q, const uint32_t padding,
             rightEdgeDtype = get2ndDerTypeForEdges(
                 derivtype, BoundaryType::BLOCK_PHYS_BOUNDARY);
         } else {
-            // TODO: update the boundary type based on what we want to build in
+            // TODO: update the boundary type based on what we want to build
+            // in
             rightEdgeDtype = get2ndDerTypeForEdges(derivtype, boundary_type);
         }
 
@@ -1924,7 +2225,8 @@ void buildPandQMatrices2ndOrder(double *P, double *Q, const uint32_t padding,
                         delete[] tempQ;
                     }
                     throw std::out_of_range(
-                        "I is either less than zero or greater than curr_n! "
+                        "I is either less than zero or greater than "
+                        "curr_n! "
                         "i=" +
                         std::to_string(i) +
                         " curr_n=" + std::to_string(curr_n));
@@ -1935,7 +2237,8 @@ void buildPandQMatrices2ndOrder(double *P, double *Q, const uint32_t padding,
                         delete[] tempQ;
                     }
                     throw std::out_of_range(
-                        "i + k is either less than 1 or greater than curr_n! "
+                        "i + k is either less than 1 or greater than "
+                        "curr_n! "
                         "i=" +
                         std::to_string(i + k) + " k=" + std::to_string(k) +
                         " curr_n=" + std::to_string(curr_n));
@@ -1947,14 +2250,16 @@ void buildPandQMatrices2ndOrder(double *P, double *Q, const uint32_t padding,
             for (int k = -method.Lf; k <= method.Rf; k++) {
                 if (!(i > -1) && !(i < curr_n)) {
                     throw std::out_of_range(
-                        "(i is either less than zero or greater than curr_n! "
+                        "(i is either less than zero or greater than "
+                        "curr_n! "
                         "i=" +
                         std::to_string(i) +
                         " curr_n=" + std::to_string(curr_n));
                 }
                 if (!((i + k) > -1) && !((i + k) < curr_n)) {
                     throw std::out_of_range(
-                        "i + k is either less than 1 or greater than curr_n! "
+                        "i + k is either less than 1 or greater than "
+                        "curr_n! "
                         "i=" +
                         std::to_string(i + k) + " k=" + std::to_string(k) +
                         " curr_n=" + std::to_string(curr_n));
@@ -2000,24 +2305,26 @@ void buildPandQMatrices2ndOrder(double *P, double *Q, const uint32_t padding,
             delete[] tempQ;
         }
         throw std::invalid_argument(
-            "The CFD deriv type was not one of the valid options. derivtype=" +
+            "The CFD deriv type was not one of the valid options. "
+            "derivtype=" +
             std::to_string(derivtype));
     }
 
     // copy the values back in
-    // NOTE: the use of j and i assumes ROW-MAJOR order, but it will just copy a
-    // square matrix in no matter what, so it's not a big issue
+    // NOTE: the use of j and i assumes ROW-MAJOR order, but it will just
+    // copy a square matrix in no matter what, so it's not a big issue
     if (is_left_edge or is_right_edge) {
         // then memcopy the "chunks" to where they go inside the matrix
         uint32_t temp_arr_i = 0;
         // iterate over the rows
         for (uint32_t jj = j_start; jj < j_end; jj++) {
             // ii will only go from empty rows we actually need to fill...
-            // j will start at "j_start" and go until "j_end" where we need to
-            // fill memory start index of our main array
+            // j will start at "j_start" and go until "j_end" where we need
+            // to fill memory start index of our main array
 
             uint32_t temp_start = INDEX_N2D(0, temp_arr_i, curr_n);
-            // uint32_t temp_end = INDEX_N2D(curr_n - 1, temp_arr_i, curr_n);
+            // uint32_t temp_end = INDEX_N2D(curr_n - 1, temp_arr_i,
+            // curr_n);
 
             std::copy_n(&tempP[temp_start], curr_n, &P[INDEX_2D(i_start, jj)]);
             std::copy_n(&tempQ[temp_start], curr_n, &Q[INDEX_2D(i_start, jj)]);
@@ -2030,7 +2337,8 @@ void buildPandQMatrices2ndOrder(double *P, double *Q, const uint32_t padding,
         delete[] tempQ;
     }
     // NOTE: tempP doesn't need to be deleted if it was not initialized,
-    // so we don't need to delete it unless we're dealing with left/right edges
+    // so we don't need to delete it unless we're dealing with left/right
+    // edges
 }
 
 void buildPandQFilterMatrices(double *P, double *Q, const uint32_t padding,
@@ -2043,8 +2351,8 @@ void buildPandQFilterMatrices(double *P, double *Q, const uint32_t padding,
     // are treated equally. We only need to account for physical "left" and
     // "right" edges
 
-    // NOTE: (2) we're also assuming that P and Q are initialized to **zero**.
-    // There are no guarantees in this function if they are not.
+    // NOTE: (2) we're also assuming that P and Q are initialized to
+    // **zero**. There are no guarantees in this function if they are not.
     // std::cout << filtertype << " is the filter type" << std::endl;
 
     uint32_t curr_n = n;
@@ -2087,8 +2395,8 @@ void buildPandQFilterMatrices(double *P, double *Q, const uint32_t padding,
     // std::cout << "i : " << i_start << " " << i_end << std::endl;
     // std::cout << "j : " << j_start << " " << j_end << std::endl;
 
-    // NOTE: when at the "edges", we need a temporary array that can be copied
-    // over
+    // NOTE: when at the "edges", we need a temporary array that can be
+    // copied over
     double *tempP = nullptr;
     double *tempQ = nullptr;
 
@@ -2099,7 +2407,8 @@ void buildPandQFilterMatrices(double *P, double *Q, const uint32_t padding,
         tempP = new double[curr_n * curr_n]();
         tempQ = new double[curr_n * curr_n]();
     } else {
-        // just use the same pointer value, then no need to adjust later even
+        // just use the same pointer value, then no need to adjust later
+        // even
         tempP = P;
         tempQ = Q;
     }
@@ -2130,7 +2439,8 @@ void buildPandQFilterMatrices(double *P, double *Q, const uint32_t padding,
             delete[] tempQ;
         }
         throw std::invalid_argument(
-            "dendro_cfd::buildPandQFilterMatrices should never be called with "
+            "dendro_cfd::buildPandQFilterMatrices should never be called "
+            "with "
             "a "
             "CFD_NONE deriv type!");
     } else {
@@ -2139,24 +2449,26 @@ void buildPandQFilterMatrices(double *P, double *Q, const uint32_t padding,
             delete[] tempQ;
         }
         throw std::invalid_argument(
-            "The filter type was not one of the valid options. filtertype=" +
+            "The filter type was not one of the valid options. "
+            "filtertype=" +
             std::to_string(filtertype));
     }
 
     // copy the values back in
-    // NOTE: the use of j and i assumes ROW-MAJOR order, but it will just copy a
-    // square matrix in no matter what, so it's not a big issue
+    // NOTE: the use of j and i assumes ROW-MAJOR order, but it will just
+    // copy a square matrix in no matter what, so it's not a big issue
     if (is_left_edge or is_right_edge) {
         // then memcopy the "chunks" to where they go inside the matrix
         uint32_t temp_arr_i = 0;
         // iterate over the rows
         for (uint32_t jj = j_start; jj < j_end; jj++) {
             // ii will only go from empty rows we actually need to fill...
-            // j will start at "j_start" and go until "j_end" where we need to
-            // fill memory start index of our main array
+            // j will start at "j_start" and go until "j_end" where we need
+            // to fill memory start index of our main array
 
             uint32_t temp_start = INDEX_N2D(0, temp_arr_i, curr_n);
-            // uint32_t temp_end = INDEX_N2D(curr_n - 1, temp_arr_i, curr_n);
+            // uint32_t temp_end = INDEX_N2D(curr_n - 1, temp_arr_i,
+            // curr_n);
 
             std::copy_n(&tempP[temp_start], curr_n, &P[INDEX_2D(i_start, jj)]);
             std::copy_n(&tempQ[temp_start], curr_n, &Q[INDEX_2D(i_start, jj)]);
@@ -2169,7 +2481,8 @@ void buildPandQFilterMatrices(double *P, double *Q, const uint32_t padding,
         delete[] tempQ;
     }
     // NOTE: tempP doesn't need to be deleted if it was not initialized,
-    // so we don't need to delete it unless we're dealing with left/right edges
+    // so we don't need to delete it unless we're dealing with left/right
+    // edges
 }
 
 void calculateDerivMatrix(double *D, double *P, double *Q, const int n) {
@@ -2321,7 +2634,8 @@ void buildMatrixLeft(double *P, double *Q, int *xib, const DerType dtype,
         case CFD_P1_O4_CLOSE: {
             if (nghosts < 3) {
                 throw std::invalid_argument(
-                    "Not enough dimensionality in ghost points! Need at least "
+                    "Not enough dimensionality in ghost points! Need at "
+                    "least "
                     "3! nghosts = " +
                     std::to_string(nghosts));
             }
@@ -2348,7 +2662,8 @@ void buildMatrixLeft(double *P, double *Q, int *xib, const DerType dtype,
         case CFD_P1_O6_CLOSE: {
             if (nghosts < 4) {
                 throw std::invalid_argument(
-                    "Not enough dimensionality in ghost points! Need at least "
+                    "Not enough dimensionality in ghost points! Need at "
+                    "least "
                     "4! nghosts = " +
                     std::to_string(nghosts));
             }
@@ -2377,7 +2692,8 @@ void buildMatrixLeft(double *P, double *Q, int *xib, const DerType dtype,
         case CFD_P1_O4_L4_CLOSE: {
             if (nghosts < 1) {
                 throw std::invalid_argument(
-                    "Not enough dimensionality in ghost points! Need at least "
+                    "Not enough dimensionality in ghost points! Need at "
+                    "least "
                     "1! nghosts = " +
                     std::to_string(nghosts));
             }
@@ -2404,7 +2720,8 @@ void buildMatrixLeft(double *P, double *Q, int *xib, const DerType dtype,
         case CFD_P1_O6_L6_CLOSE: {
             if (nghosts < 2) {
                 throw std::invalid_argument(
-                    "Not enough dimensionality in ghost points! Need at least "
+                    "Not enough dimensionality in ghost points! Need at "
+                    "least "
                     "2! nghosts = " +
                     std::to_string(nghosts));
             }
@@ -2459,9 +2776,9 @@ void buildMatrixLeft(double *P, double *Q, int *xib, const DerType dtype,
         } break;
 
             // NOTE: in original initcfd.c file from David Neilsen, this was
-            // repeated in the if statement, but in an elif, so it's unreachable
-            // anyway since this value is handled in the same way above case
-            // CFD_P1_O4_L4_CLOSE: ...
+            // repeated in the if statement, but in an elif, so it's
+            // unreachable anyway since this value is handled in the same
+            // way above case CFD_P1_O4_L4_CLOSE: ...
 
         default:
             throw std::invalid_argument(
@@ -2552,7 +2869,8 @@ void buildMatrixRight(double *P, double *Q, int *xie, const DerType dtype,
         case CFD_P1_O4_CLOSE: {
             if (nghosts < 3) {
                 throw std::invalid_argument(
-                    "Not enough dimensionality in ghost points! Need at least "
+                    "Not enough dimensionality in ghost points! Need at "
+                    "least "
                     "3! nghosts = " +
                     std::to_string(nghosts));
             }
@@ -2579,7 +2897,8 @@ void buildMatrixRight(double *P, double *Q, int *xie, const DerType dtype,
         case CFD_P1_O6_CLOSE: {
             if (nghosts < 4) {
                 throw std::invalid_argument(
-                    "Not enough dimensionality in ghost points! Need at least "
+                    "Not enough dimensionality in ghost points! Need at "
+                    "least "
                     "4! nghosts = " +
                     std::to_string(nghosts));
             }
@@ -2608,7 +2927,8 @@ void buildMatrixRight(double *P, double *Q, int *xie, const DerType dtype,
         case CFD_P1_O4_L4_CLOSE: {
             if (nghosts < 1) {
                 throw std::invalid_argument(
-                    "Not enough dimensionality in ghost points! Need at least "
+                    "Not enough dimensionality in ghost points! Need at "
+                    "least "
                     "1! nghosts = " +
                     std::to_string(nghosts));
             }
@@ -2634,7 +2954,8 @@ void buildMatrixRight(double *P, double *Q, int *xie, const DerType dtype,
         case CFD_P1_O6_L6_CLOSE: {
             if (nghosts < 2) {
                 throw std::invalid_argument(
-                    "Not enough dimensionality in ghost points! Need at least "
+                    "Not enough dimensionality in ghost points! Need at "
+                    "least "
                     "2! nghosts = " +
                     std::to_string(nghosts));
             }
@@ -2778,7 +3099,8 @@ void buildMatrixLeft2nd(double *P, double *Q, int *xib, const DerType2nd dtype,
         case CFD2ND_P2_O4_CLOSE: {
             if (nghosts < 3) {
                 throw std::invalid_argument(
-                    "Not enough dimensionality in ghost points! Need at least "
+                    "Not enough dimensionality in ghost points! Need at "
+                    "least "
                     "3! nghosts = " +
                     std::to_string(nghosts));
             }
@@ -2805,7 +3127,8 @@ void buildMatrixLeft2nd(double *P, double *Q, int *xib, const DerType2nd dtype,
         case CFD2ND_P2_O6_CLOSE: {
             if (nghosts < 4) {
                 throw std::invalid_argument(
-                    "Not enough dimensionality in ghost points! Need at least "
+                    "Not enough dimensionality in ghost points! Need at "
+                    "least "
                     "4! nghosts = " +
                     std::to_string(nghosts));
             }
@@ -2834,7 +3157,8 @@ void buildMatrixLeft2nd(double *P, double *Q, int *xib, const DerType2nd dtype,
         case CFD2ND_P2_O4_L4_CLOSE: {
             if (nghosts < 1) {
                 throw std::invalid_argument(
-                    "Not enough dimensionality in ghost points! Need at least "
+                    "Not enough dimensionality in ghost points! Need at "
+                    "least "
                     "1! nghosts = " +
                     std::to_string(nghosts));
             }
@@ -2847,7 +3171,8 @@ void buildMatrixLeft2nd(double *P, double *Q, int *xib, const DerType2nd dtype,
         case CFD2ND_P2_O6_L6_CLOSE: {
             if (nghosts < 2) {
                 throw std::invalid_argument(
-                    "Not enough dimensionality in ghost points! Need at least "
+                    "Not enough dimensionality in ghost points! Need at "
+                    "least "
                     "2! nghosts = " +
                     std::to_string(nghosts));
             }
@@ -2887,9 +3212,9 @@ void buildMatrixLeft2nd(double *P, double *Q, int *xib, const DerType2nd dtype,
         } break;
 
             // NOTE: in original initcfd.c file from David Neilsen, this was
-            // repeated in the if statement, but in an elif, so it's unreachable
-            // anyway since this value is handled in the same way above case
-            // CFD_P1_O4_L4_CLOSE: ...
+            // repeated in the if statement, but in an elif, so it's
+            // unreachable anyway since this value is handled in the same
+            // way above case CFD_P1_O4_L4_CLOSE: ...
 
         default:
             throw std::invalid_argument(
@@ -2985,7 +3310,8 @@ void buildMatrixRight2nd(double *P, double *Q, int *xie, const DerType2nd dtype,
         case CFD2ND_P2_O4_CLOSE: {
             if (nghosts < 3) {
                 throw std::invalid_argument(
-                    "Not enough dimensionality in ghost points! Need at least "
+                    "Not enough dimensionality in ghost points! Need at "
+                    "least "
                     "3! nghosts = " +
                     std::to_string(nghosts));
             }
@@ -3012,7 +3338,8 @@ void buildMatrixRight2nd(double *P, double *Q, int *xie, const DerType2nd dtype,
         case CFD2ND_P2_O6_CLOSE: {
             if (nghosts < 4) {
                 throw std::invalid_argument(
-                    "Not enough dimensionality in ghost points! Need at least "
+                    "Not enough dimensionality in ghost points! Need at "
+                    "least "
                     "4! nghosts = " +
                     std::to_string(nghosts));
             }
@@ -3041,7 +3368,8 @@ void buildMatrixRight2nd(double *P, double *Q, int *xie, const DerType2nd dtype,
         case CFD2ND_P2_O4_L4_CLOSE: {
             if (nghosts < 1) {
                 throw std::invalid_argument(
-                    "Not enough dimensionality in ghost points! Need at least "
+                    "Not enough dimensionality in ghost points! Need at "
+                    "least "
                     "1! nghosts = " +
                     std::to_string(nghosts));
             }
@@ -3055,7 +3383,8 @@ void buildMatrixRight2nd(double *P, double *Q, int *xie, const DerType2nd dtype,
         case CFD2ND_P2_O6_L6_CLOSE: {
             if (nghosts < 2) {
                 throw std::invalid_argument(
-                    "Not enough dimensionality in ghost points! Need at least "
+                    "Not enough dimensionality in ghost points! Need at "
+                    "least "
                     "2! nghosts = " +
                     std::to_string(nghosts));
             }
@@ -3259,8 +3588,8 @@ void kim_filter_cal_coeff(double *c, double kc) {
 
 void initializeKim6FilterPQ(double *P, double *Q, int n, double kc,
                             double eps) {
-    std::cout << "KIM6 FILTER PARAMS: kc, eps: " << kc << " " << eps
-              << std::endl;
+    // std::cout << "KIM6 FILTER PARAMS: kc, eps: " << kc << " " << eps
+    //           << " for n " << n << std::endl;
 
     double c0[3];
     double cd[3];
@@ -3494,7 +3823,8 @@ void initializeJTFilterT6PQ(double *P, double *Q, int n, int padding,
         Q[INDEX_2D(i, i + 3)] = d / 2.0;
     }
 
-    // fbound asks us to build the filters as if we were right up to the edge
+    // fbound asks us to build the filters as if we were right up to the
+    // edge
     if (fbound) {
         if (is_left_edge) {
             P[INDEX_2D(0, 1)] = alpha;
@@ -4016,6 +4346,20 @@ void print_square_mat(double *m, const uint32_t n) {
     }
 }
 
+void print_nonsquare_mat(double *m, const uint32_t n_cols,
+                         const uint32_t n_rows) {
+    // m is the number of columns (so will be internal value) and n is the
+    // number of rows assumes "col" order in memory J is the row!
+    for (uint16_t i = 0; i < n_rows; i++) {
+        printf("%3d : ", i);
+        // I is the column!
+        for (uint16_t j = 0; j < n_cols; j++) {
+            printf("%20.16f ", m[INDEX_N2D(i, j, n_cols)]);
+        }
+        printf("\n");
+    }
+}
+
 void buildDerivExplicitRMatrix(double *R, const unsigned int padding,
                                const unsigned int n, const DerType deriv_type,
                                const bool is_left_edge,
@@ -4052,12 +4396,13 @@ void buildDerivExplicitRMatrix(double *R, const unsigned int padding,
         // initialize tempR to be a "smaller" square matrix for use
         tempR = new double[curr_n * curr_n]();
     } else {
-        // just use the same pointer value, then no need to adjust later even
+        // just use the same pointer value, then no need to adjust later
+        // even
         tempR = R;
     }
 
-    // NOTE: the right edge/left edge on the following functions are always true
-    // in this case
+    // NOTE: the right edge/left edge on the following functions are always
+    // true in this case
     if (deriv_type == EXPLCT_FD_O4) {
         buildDerivExplicit4thOrder(tempR, curr_n, true, true);
     } else if (deriv_type == EXPLCT_FD_O6) {
@@ -4074,19 +4419,20 @@ void buildDerivExplicitRMatrix(double *R, const unsigned int padding,
     }
 
     // copy the values back in
-    // NOTE: the use of j and i assumes ROW-MAJOR order, but it will just copy a
-    // square matrix in no matter what, so it's not a big issue
+    // NOTE: the use of j and i assumes ROW-MAJOR order, but it will just
+    // copy a square matrix in no matter what, so it's not a big issue
     if (is_left_edge or is_right_edge) {
         // then memcopy the "chunks" to where they go inside the matrix
         uint32_t temp_arr_i = 0;
         // iterate over the rows
         for (uint32_t jj = j_start; jj < j_end; jj++) {
             // ii will only go from empty rows we actually need to fill...
-            // j will start at "j_start" and go until "j_end" where we need to
-            // fill memory start index of our main array
+            // j will start at "j_start" and go until "j_end" where we need
+            // to fill memory start index of our main array
 
             uint32_t temp_start = INDEX_N2D(0, temp_arr_i, curr_n);
-            // uint32_t temp_end = INDEX_N2D(curr_n - 1, temp_arr_i, curr_n);
+            // uint32_t temp_end = INDEX_N2D(curr_n - 1, temp_arr_i,
+            // curr_n);
 
             std::copy_n(&tempR[temp_start], curr_n, &R[INDEX_2D(i_start, jj)]);
 
@@ -4097,7 +4443,8 @@ void buildDerivExplicitRMatrix(double *R, const unsigned int padding,
         delete[] tempR;
     }
     // NOTE: tempR doesn't need to be deleted if it was not initialized,
-    // so we don't need to delete it unless we're dealing with left/right edges
+    // so we don't need to delete it unless we're dealing with left/right
+    // edges
 
 #ifdef PRINT_COMPACT_MATRICES
     std::cout << "\nDERIV MATRIX R" << std::endl;
@@ -4142,12 +4489,13 @@ void build2ndDerivExplicitRMatrix(double *R, const unsigned int padding,
         // initialize tempR to be a "smaller" square matrix for use
         tempR = new double[curr_n * curr_n]();
     } else {
-        // just use the same pointer value, then no need to adjust later even
+        // just use the same pointer value, then no need to adjust later
+        // even
         tempR = R;
     }
 
-    // NOTE: the right edge/left edge on the following functions are always true
-    // or else we don't fill it out properly!
+    // NOTE: the right edge/left edge on the following functions are always
+    // true or else we don't fill it out properly!
     if (deriv_type == EXPLCT2ND_FD_O4) {
         build2ndDerivExplicit4thOrder(tempR, curr_n, true, true);
     } else if (deriv_type == EXPLCT2ND_FD_O6) {
@@ -4164,19 +4512,20 @@ void build2ndDerivExplicitRMatrix(double *R, const unsigned int padding,
     }
 
     // copy the values back in
-    // NOTE: the use of j and i assumes ROW-MAJOR order, but it will just copy a
-    // square matrix in no matter what, so it's not a big issue
+    // NOTE: the use of j and i assumes ROW-MAJOR order, but it will just
+    // copy a square matrix in no matter what, so it's not a big issue
     if (is_left_edge or is_right_edge) {
         // then memcopy the "chunks" to where they go inside the matrix
         uint32_t temp_arr_i = 0;
         // iterate over the rows
         for (uint32_t jj = j_start; jj < j_end; jj++) {
             // ii will only go from empty rows we actually need to fill...
-            // j will start at "j_start" and go until "j_end" where we need to
-            // fill memory start index of our main array
+            // j will start at "j_start" and go until "j_end" where we need
+            // to fill memory start index of our main array
 
             uint32_t temp_start = INDEX_N2D(0, temp_arr_i, curr_n);
-            // uint32_t temp_end = INDEX_N2D(curr_n - 1, temp_arr_i, curr_n);
+            // uint32_t temp_end = INDEX_N2D(curr_n - 1, temp_arr_i,
+            // curr_n);
 
             std::copy_n(&tempR[temp_start], curr_n, &R[INDEX_2D(i_start, jj)]);
 
@@ -4187,7 +4536,8 @@ void build2ndDerivExplicitRMatrix(double *R, const unsigned int padding,
         delete[] tempR;
     }
     // NOTE: tempR doesn't need to be deleted if it was not initialized,
-    // so we don't need to delete it unless we're dealing with left/right edges
+    // so we don't need to delete it unless we're dealing with left/right
+    // edges
 
 #ifdef PRINT_COMPACT_MATRICES
     std::cout << "\n2ND DERIV MATRIX R" << std::endl;
@@ -4225,7 +4575,8 @@ void buildDerivExplicit4thOrder(double *R, const unsigned int n,
     // n is now an *INDEX* for the "row" we want to use, not related to n
     uint32_t end = n - 1;
 
-    // always assuming that we're starting with row 0, even if it's a right edge
+    // always assuming that we're starting with row 0, even if it's a right
+    // edge
     if (is_left_edge) {
         // first available row
         R[INDEX_2D(start, start)] = -3.0 / 2.0;  // this is the point
@@ -4234,7 +4585,8 @@ void buildDerivExplicit4thOrder(double *R, const unsigned int n,
 
         // second row
         R[INDEX_2D(start + 1, start)] = -1.0 / 2.0;
-        // R[INDEX_2D(start + 1, start + 1)] = 0.0 / 2.0; // this is the point
+        // R[INDEX_2D(start + 1, start + 1)] = 0.0 / 2.0; // this is the
+        // point
         R[INDEX_2D(start + 1, start + 2)] = 1.0 / 2.0;
 
         start += 2;
@@ -4294,7 +4646,8 @@ void buildDerivExplicit6thOrder(double *R, const unsigned int n,
     // n is now an *INDEX* for the "row" we want to use, not related to n
     uint32_t end = n - 1;
 
-    // always assuming that we're starting with row 0, even if it's a right edge
+    // always assuming that we're starting with row 0, even if it's a right
+    // edge
     if (is_left_edge) {
         // first available row
         R[INDEX_2D(start, start)] = -25.0 / 12.0;
@@ -4387,7 +4740,8 @@ void buildDerivExplicit8thOrder(double *R, const unsigned int n,
     // n is now an *INDEX* for the "row" we want to use, not related to n
     uint32_t end = n - 1;
 
-    // always assuming that we're starting with row 0, even if it's a right edge
+    // always assuming that we're starting with row 0, even if it's a right
+    // edge
     if (is_left_edge) {
         // first available row
         R[INDEX_2D(start, start)] = -147.0 / 60.0;  // this is the point
@@ -4420,7 +4774,8 @@ void buildDerivExplicit8thOrder(double *R, const unsigned int n,
         R[INDEX_2D(start + 3, start)] = -1.0 / 60.0;
         R[INDEX_2D(start + 3, start + 1)] = 9.0 / 60.0;
         R[INDEX_2D(start + 3, start + 2)] = -45.0 / 60.0;
-        // R[INDEX_2D(start + 3, start + 3)] = 0.0 / 60.0; // this is the point
+        // R[INDEX_2D(start + 3, start + 3)] = 0.0 / 60.0; // this is the
+        // point
         R[INDEX_2D(start + 3, start + 4)] = 45.0 / 60.0;
         R[INDEX_2D(start + 3, start + 5)] = -9.0 / 60.0;
         R[INDEX_2D(start + 3, start + 6)] = 1.0 / 60.0;
@@ -4503,7 +4858,8 @@ void buildKOExplicit6thOrder(double *R, const unsigned int n,
 
     if (padding < 3) {
         throw std::invalid_argument(
-            "There isn't enough padding in the explicit 6th order KO matrix, "
+            "There isn't enough padding in the explicit 6th order KO "
+            "matrix, "
             "padding must be >= 3, and it is currently " +
             std::to_string(padding));
     }
@@ -4511,16 +4867,20 @@ void buildKOExplicit6thOrder(double *R, const unsigned int n,
     if (is_left_edge && is_right_edge) {
         if (n - (padding * 2) < 6) {
             throw std::invalid_argument(
-                "There isn't enough space in the explicit 6th order KO matrix "
-                "for left and right edge to be set, n - 2 * padding must be > "
+                "There isn't enough space in the explicit 6th order KO "
+                "matrix "
+                "for left and right edge to be set, n - 2 * padding must "
+                "be > "
                 "6, and it is currently " +
                 std::to_string(n - (2 * padding)));
         }
     } else if (is_left_edge || is_right_edge) {
         if (n - (padding * 2) < 3) {
             throw std::invalid_argument(
-                "There isn't enough space in the explicit 6th order KO matrix "
-                "for left or right edge to be set, n - 2 * padding must be > "
+                "There isn't enough space in the explicit 6th order KO "
+                "matrix "
+                "for left or right edge to be set, n - 2 * padding must be "
+                "> "
                 "3, and it is currently " +
                 std::to_string(n - (2 * padding)));
         }
@@ -4539,7 +4899,8 @@ void buildKOExplicit6thOrder(double *R, const unsigned int n,
     const double invSMR2 = 48.0 / (43.0 * 64.0);
     const double invSMR1 = 48.0 / (49.0 * 64.0);
 
-    // always assuming that we're starting with row 0, even if it's a right edge
+    // always assuming that we're starting with row 0, even if it's a right
+    // edge
     if (is_left_edge) {
         // first available row
         R[INDEX_2D(start, start)] = 1 * invSMR3;
@@ -4613,7 +4974,8 @@ void buildKOExplicit8thOrder(double *R, const unsigned int n,
 
     if (padding < 4) {
         throw std::invalid_argument(
-            "There isn't enough padding in the explicit 6th order KO matrix, "
+            "There isn't enough padding in the explicit 6th order KO "
+            "matrix, "
             "padding must be >= 4, and it is currently " +
             std::to_string(padding));
     }
@@ -4621,16 +4983,20 @@ void buildKOExplicit8thOrder(double *R, const unsigned int n,
     if (is_left_edge && is_right_edge) {
         if (n - (padding * 2) < 8) {
             throw std::invalid_argument(
-                "There isn't enough space in the explicit 6th order KO matrix "
-                "for left and right edge to be set, n - 2 * padding must be > "
+                "There isn't enough space in the explicit 6th order KO "
+                "matrix "
+                "for left and right edge to be set, n - 2 * padding must "
+                "be > "
                 "8, and it is currently " +
                 std::to_string(n - (2 * padding)));
         }
     } else if (is_left_edge || is_right_edge) {
         if (n - (padding * 2) < 4) {
             throw std::invalid_argument(
-                "There isn't enough space in the explicit 6th order KO matrix "
-                "for left or right edge to be set, n - 2 * padding must be > "
+                "There isn't enough space in the explicit 6th order KO "
+                "matrix "
+                "for left or right edge to be set, n - 2 * padding must be "
+                "> "
                 "4, and it is currently " +
                 std::to_string(n - (2 * padding)));
         }
@@ -4649,7 +5015,8 @@ void buildKOExplicit8thOrder(double *R, const unsigned int n,
     const double invSMR2 = 48.0 / (43.0 * 256.0);
     const double invSMR1 = 48.0 / (49.0 * 256.0);
 
-    // always assuming that we're starting with row 0, even if it's a right edge
+    // always assuming that we're starting with row 0, even if it's a right
+    // edge
     if (is_left_edge) {
         // first available row
         R[INDEX_2D(start, start)] = -1.0 * invSMR4;
@@ -4748,7 +5115,8 @@ void build2ndDerivExplicit4thOrder(double *R, const unsigned int n,
     if (is_left_edge && is_right_edge) {
         if (n < 4) {
             throw std::invalid_argument(
-                "There isn't enough space in the explicit 6th order 2nd deriv "
+                "There isn't enough space in the explicit 6th order 2nd "
+                "deriv "
                 "matrix "
                 "for left and right edge to be set, n must be >= "
                 "4, and it is currently " +
@@ -4757,7 +5125,8 @@ void build2ndDerivExplicit4thOrder(double *R, const unsigned int n,
     } else if (is_left_edge || is_right_edge) {
         if (n < 2) {
             throw std::invalid_argument(
-                "There isn't enough space in the explicit 6th order 2nd deriv "
+                "There isn't enough space in the explicit 6th order 2nd "
+                "deriv "
                 "matrix "
                 "for left or right edge to be set, n must be >= "
                 "2, and it is currently " +
@@ -4769,8 +5138,8 @@ void build2ndDerivExplicit4thOrder(double *R, const unsigned int n,
     // n is now an *INDEX* for the "row" we want to use, not related to n
     uint32_t end = n - 1;
 
-    // always assuming that we're starting with row 0, even if it's a right edge
-    // NOTE: this is using the 644 stencil structure from derivs.cpp
+    // always assuming that we're starting with row 0, even if it's a right
+    // edge NOTE: this is using the 644 stencil structure from derivs.cpp
     if (is_left_edge) {
         // first available row
         R[INDEX_2D(start, start)] = 2.0 / 1.0;  // POINT 0
@@ -4820,7 +5189,8 @@ void build2ndDerivExplicit6thOrder(double *R, const unsigned int n,
     if (is_left_edge && is_right_edge) {
         if (n < 6) {
             throw std::invalid_argument(
-                "There isn't enough space in the explicit 6th order 2nd deriv "
+                "There isn't enough space in the explicit 6th order 2nd "
+                "deriv "
                 "matrix "
                 "for left and right edge to be set, n must be >= "
                 "6, and it is currently " +
@@ -4829,7 +5199,8 @@ void build2ndDerivExplicit6thOrder(double *R, const unsigned int n,
     } else if (is_left_edge || is_right_edge) {
         if (n < 3) {
             throw std::invalid_argument(
-                "There isn't enough space in the explicit 6th order 2nd deriv "
+                "There isn't enough space in the explicit 6th order 2nd "
+                "deriv "
                 "matrix "
                 "for left or right edge to be set, n must be >= "
                 "3, and it is currently " +
@@ -4841,8 +5212,8 @@ void build2ndDerivExplicit6thOrder(double *R, const unsigned int n,
     // n is now an *INDEX* for the "row" we want to use, not related to n
     uint32_t end = n - 1;
 
-    // always assuming that we're starting with row 0, even if it's a right edge
-    // NOTE: this is using the 644 stencil structure from derivs.cpp
+    // always assuming that we're starting with row 0, even if it's a right
+    // edge NOTE: this is using the 644 stencil structure from derivs.cpp
     if (is_left_edge) {
         // first available row
         R[INDEX_2D(start, start)] = 45.0 / 12.0;  // POINT 0
@@ -4920,7 +5291,8 @@ void build2ndDerivExplicit8thOrder(double *R, const unsigned int n,
     if (is_left_edge && is_right_edge) {
         if (n < 8) {
             throw std::invalid_argument(
-                "There isn't enough space in the explicit 8th order 2nd deriv "
+                "There isn't enough space in the explicit 8th order 2nd "
+                "deriv "
                 "matrix "
                 "for left and right edge to be set, n must be >= "
                 "8, and it is currently " +
@@ -4929,7 +5301,8 @@ void build2ndDerivExplicit8thOrder(double *R, const unsigned int n,
     } else if (is_left_edge || is_right_edge) {
         if (n < 4) {
             throw std::invalid_argument(
-                "There isn't enough space in the explicit 8th order 2nd deriv "
+                "There isn't enough space in the explicit 8th order 2nd "
+                "deriv "
                 "matrix "
                 "for left or right edge to be set, n must be >= "
                 "3, and it is currently " +
@@ -4941,13 +5314,14 @@ void build2ndDerivExplicit8thOrder(double *R, const unsigned int n,
     // n is now an *INDEX* for the "row" we want to use, not related to n
     uint32_t end = n - 1;
 
-    // always assuming that we're starting with row 0, even if it's a right edge
+    // always assuming that we're starting with row 0, even if it's a right
+    // edge
 
     // NOTE: this uses 8666's implementation since we can use it all in the
     // matrix!
     if (is_left_edge) {
-        // NOTE: none of these points extend beyond the "middle" of the block
-        // first available row
+        // NOTE: none of these points extend beyond the "middle" of the
+        // block first available row
         R[INDEX_2D(start, start)] = 938.0 / 180.0;  // POINT 0
         R[INDEX_2D(start, start + 1)] = -4014.0 / 180.0;
         R[INDEX_2D(start, start + 2)] = 7911.0 / 180.0;
@@ -5990,3 +6364,323 @@ bool initKim_Filter_Deriv4(double *RF, const unsigned int n) {
 
     return 0;
 }
+
+/**
+ * =========================================
+ * BEGIN NEW KO DERIV VALUES - MATRIX SET-UP
+ */
+
+// sbp_diss_2_1_coeffs {{{
+void sbp_diss_2_1_coeffs(double a[16][16], double q[2]) {
+    a[0][0] = -2.0;
+    a[1][0] = 2.0;
+    a[2][0] = 0.0;
+    a[0][1] = 1.0;
+    a[1][1] = -2.0;
+    a[2][1] = 1.0;
+
+    q[0] = -2.0;
+    q[1] = 1.0;
+}
+// }}}
+
+// sbp_diss_4_2_coeffs {{{
+void sbp_diss_4_2_coeffs(double a[16][16], double q[3]) {
+    a[0][0] = -2.8235294117647058823529411764705882352941176470588;
+    a[1][0] = 5.6470588235294117647058823529411764705882352941176;
+    a[2][0] = -2.8235294117647058823529411764705882352941176470588;
+    a[3][0] = 0.0;
+    a[4][0] = 0.0;
+    a[5][0] = 0.0;
+    a[0][1] = 1.6271186440677966101694915254237288135593220338983;
+    a[1][1] = -4.0677966101694915254237288135593220338983050847458;
+    a[2][1] = 3.2542372881355932203389830508474576271186440677966;
+    a[3][1] = -0.81355932203389830508474576271186440677966101694915;
+    a[4][1] = 0.0;
+    a[5][1] = 0.0;
+    a[0][2] = -1.1162790697674418604651162790697674418604651162791;
+    a[1][2] = 4.4651162790697674418604651162790697674418604651163;
+    a[2][2] = -6.6976744186046511627906976744186046511627906976744;
+    a[3][2] = 4.4651162790697674418604651162790697674418604651163;
+    a[4][2] = -1.1162790697674418604651162790697674418604651162791;
+    a[5][2] = 0.0;
+    a[0][3] = 0.0;
+    a[1][3] = -0.97959183673469387755102040816326530612244897959184;
+    a[2][3] = 3.9183673469387755102040816326530612244897959183673;
+    a[3][3] = -5.8775510204081632653061224489795918367346938775510;
+    a[4][3] = 3.9183673469387755102040816326530612244897959183673;
+    a[5][3] = -0.97959183673469387755102040816326530612244897959184;
+
+    q[0] = -6.0;
+    q[1] = 4.0;
+    q[2] = -1.0;
+}
+// }}}
+
+// sbp_diss_6_3_coeffs {{{
+void sbp_diss_6_3_coeffs(double a[16][16], double q[4]) {
+    a[0][0] = -3.1650670378782328375705179866656897941241116565316;
+    a[1][0] = 9.4952011136346985127115539599970693823723349695948;
+    a[2][0] = -9.4952011136346985127115539599970693823723349695948;
+    a[3][0] = 3.1650670378782328375705179866656897941241116565316;
+    a[4][0] = 0.0;
+    a[5][0] = 0.0;
+    a[6][0] = 0.0;
+    a[7][0] = 0.0;
+    a[8][0] = 0.0;
+
+    a[0][1] = 2.1576625322567218846249895946058436693581952884375;
+    a[1][1] = -7.1922084408557396154166319820194788978606509614584;
+    a[2][1] = 8.6306501290268875384999583784233746774327811537501;
+    a[3][1] = -4.3153250645134437692499791892116873387163905768751;
+    a[4][1] = 0.71922084408557396154166319820194788978606509614584;
+    a[5][1] = 0.0;
+    a[6][1] = 0.0;
+    a[7][1] = 0.0;
+    a[8][1] = 0.0;
+
+    a[0][2] = -4.7805237919586868314275175212098856510512725931391;
+    a[1][2] = 19.122095167834747325710070084839542604205090372556;
+    a[2][2] = -30.276650682405016599040944300995942456658059756547;
+    a[3][2] = 23.902618959793434157137587606049428255256362965695;
+    a[4][2] = -9.5610475839173736628550350424197713021025451862781;
+    a[5][2] = 1.5935079306528956104758391737366285503504241977130;
+    a[6][2] = 0.0;
+    a[7][2] = 0.0;
+    a[8][2] = 0.0;
+
+    a[0][3] = 0.80612054487777570442246687814890837842881134540026;
+    a[1][3] = -4.8367232692666542265348012688934502705728680724016;
+    a[2][3] = 12.091808173166635566337003172233625676432170181004;
+    a[3][3] = -16.122410897555514088449337562978167568576226908005;
+    a[4][3] = 12.091808173166635566337003172233625676432170181004;
+    a[5][3] = -4.8367232692666542265348012688934502705728680724016;
+    a[6][3] = 0.80612054487777570442246687814890837842881134540026;
+    a[7][3] = 0.0;
+    a[8][3] = 0.0;
+
+    a[0][4] = 0.0;
+    a[1][4] = 1.0968642884346832550463374381109559476958232829758;
+    a[2][4] = -6.5811857306080995302780246286657356861749396978545;
+    a[3][4] = 16.452964326520248825695061571664339215437349244636;
+    a[4][4] = -21.937285768693665100926748762219118953916465659515;
+    a[5][4] = 16.452964326520248825695061571664339215437349244636;
+    a[6][4] = -6.5811857306080995302780246286657356861749396978545;
+    a[7][4] = 1.0968642884346832550463374381109559476958232829758;
+    a[8][4] = 0.0;
+
+    a[0][5] = 0.0;
+    a[1][5] = 0.0;
+    a[2][5] = 0.98627885208100271683294901942878016483641925983425;
+    a[3][5] = -5.9176731124860163009976941165726809890185155590055;
+    a[4][5] = 14.794182781215040752494235291431702472546288897514;
+    a[5][5] = -19.725577041620054336658980388575603296728385196685;
+    a[6][5] = 14.794182781215040752494235291431702472546288897514;
+    a[7][5] = -5.9176731124860163009976941165726809890185155590055;
+    a[8][5] = 0.98627885208100271683294901942878016483641925983425;
+
+    q[0] = -20.0;
+    q[1] = 15.0;
+    q[2] = -6.0;
+    q[3] = 1.0;
+}
+// }}}
+
+// sbp_diss_8_4_coeffs {{{
+void sbp_diss_8_4_coeffs(double a[16][16], double q[5]) {
+    a[0][0] = -3.3910872088637970174997113084967416241083103770745;
+    a[1][0] = 13.564348835455188069998845233986966496433241508298;
+    a[2][0] = -20.346523253182782104998267850980449744649862262447;
+    a[3][0] = 13.564348835455188069998845233986966496433241508298;
+    a[4][0] = -3.3910872088637970174997113084967416241083103770745;
+    a[5][0] = 0.0;
+    a[6][0] = 0.0;
+    a[7][0] = 0.0;
+    a[8][0] = 0.0;
+    a[9][0] = 0.0;
+    a[10][0] = 0.0;
+    a[11][0] = 0.0;
+
+    a[0][1] = 2.6217119552210904473646423259312909608627056453179;
+    a[1][1] = -11.142275809689634401299729885207986583666498992601;
+    a[2][1] = 18.351983686547633131552496281519036726038939517225;
+    a[3][1] = -14.419415753715997460505532792622100284744881049248;
+    a[4][1] = 5.2434239104421808947292846518625819217254112906357;
+    a[5][1] = -0.65542798880527261184116058148282274021567641132947;
+    a[6][1] = 0.0;
+    a[7][1] = 0.0;
+    a[8][1] = 0.0;
+    a[9][1] = 0.0;
+    a[10][1] = 0.0;
+    a[11][1] = 0.0;
+
+    a[0][2] = -23.305235778623380376667790568855064784933288377246;
+    a[1][2] = 108.75776696690910842444968932132363566302201242715;
+    a[2][2] = -205.86291604450652666056548335821973893357738066567;
+    a[3][2] = 201.97871008140262993112085159674389480275516593613;
+    a[4][2] = -108.75776696690910842444968932132363566302201242715;
+    a[5][2] = 31.073647704831173835557054091806753046577717836328;
+    a[6][2] = -3.8842059631038967294446317614758441308222147295410;
+    a[7][2] = 0.0;
+    a[8][2] = 0.0;
+    a[9][2] = 0.0;
+    a[10][2] = 0.0;
+    a[11][2] = 0.0;
+
+    a[0][3] = 2.2245534287765737751523181243817045070532621097794;
+    a[1][3] = -12.235043858271155763337749684099374788792941603787;
+    a[2][3] = 28.919194574095459076980135616962158591692407427132;
+    a[3][3] = -38.373546646395897621377487645584402746668771393695;
+    a[4][3] = 31.143748002872032852132453741343863098745669536912;
+    a[5][3] = -15.571874001436016426066226870671931549372834768456;
+    a[6][3] = 4.4491068575531475503046362487634090141065242195588;
+    a[7][3] = -0.55613835719414344378807953109542612676331552744485;
+    a[8][3] = 0.0;
+    a[9][3] = 0.0;
+    a[10][3] = 0.0;
+    a[11][3] = 0.0;
+
+    a[0][4] = -2.4230202953323072711308162536265511957185829658094;
+    a[1][4] = 19.384162362658458169046530029012409565748663726475;
+    a[2][4] = -67.844568269304603591662855101543433480120323042664;
+    a[3][4] = 135.68913653860920718332571020308686696024064608533;
+    a[4][4] = -169.61142067326150897915713775385858370030080760666;
+    a[5][4] = 135.68913653860920718332571020308686696024064608533;
+    a[6][4] = -67.844568269304603591662855101543433480120323042664;
+    a[7][4] = 19.384162362658458169046530029012409565748663726475;
+    a[8][4] = -2.4230202953323072711308162536265511957185829658094;
+    a[9][4] = 0.0;
+    a[10][4] = 0.0;
+    a[11][4] = 0.0;
+
+    a[0][5] = 0.0;
+    a[1][5] = -0.78217600900123184961735065035840034142603567514089;
+    a[2][5] = 6.2574080720098547969388052028672027314082854011271;
+    a[3][5] = -21.900928252034491789285818210035209559928998903945;
+    a[4][5] = 43.801856504068983578571636420070419119857997807890;
+    a[5][5] = -54.752320630086229473214545525088023899822497259862;
+    a[6][5] = 43.801856504068983578571636420070419119857997807890;
+    a[7][5] = -21.900928252034491789285818210035209559928998903945;
+    a[8][5] = 6.2574080720098547969388052028672027314082854011271;
+    a[9][5] = -0.78217600900123184961735065035840034142603567514089;
+    a[10][5] = 0.0;
+    a[11][5] = 0.0;
+
+    a[0][6] = 0.0;
+    a[1][6] = 0.0;
+    a[2][6] = -1.0830767761393601764536458481012280421614377748694;
+    a[3][6] = 8.6646142091148814116291667848098243372915021989551;
+    a[4][6] = -30.326149731902084940702083746834385180520257696343;
+    a[5][6] = 60.652299463804169881404167493668770361040515392685;
+    a[6][6] = -75.815374329755212351755209367085962951300644240857;
+    a[7][6] = 60.652299463804169881404167493668770361040515392685;
+    a[8][6] = -30.326149731902084940702083746834385180520257696343;
+    a[9][6] = 8.6646142091148814116291667848098243372915021989551;
+    a[10][6] = -1.0830767761393601764536458481012280421614377748694;
+    a[11][6] = 0.0;
+
+    a[0][7] = 0.0;
+    a[1][7] = 0.0;
+    a[2][7] = 0.0;
+    a[3][7] = -0.99075245444434671889501396229410272246695863420506;
+    a[4][7] = 7.9260196355547737511601116983528217797356690736404;
+    a[5][7] = -27.741068724441708129060390944234876229074841757742;
+    a[6][7] = 55.482137448883416258120781888469752458149683515483;
+    a[7][7] = -69.352671811104270322650977360587190572687104394354;
+    a[8][7] = 55.482137448883416258120781888469752458149683515483;
+    a[9][7] = -27.741068724441708129060390944234876229074841757742;
+    a[10][7] = 7.9260196355547737511601116983528217797356690736404;
+    a[11][7] = -0.99075245444434671889501396229410272246695863420506;
+
+    q[0] = -70.0;
+    q[1] = 56.0;
+    q[2] = -28.0;
+    q[3] = 8.0;
+    q[4] = -1.0;
+}
+// }}}
+
+void sbp_init_filter(double *A, unsigned int order, unsigned int n) {
+    // NOTE: n is the dimension of **one** side of the square matrix.
+    const double t1 = 1.0 / pow(2.0, order);
+    //  const double t1 = 1.0;  // Set to one for debugging the coefficients
+    //  from the paper.
+
+    int nj, ni, nq;
+    if (order == 2) {
+        nq = 2;
+        ni = 2;
+        nj = 3;
+    } else if (order == 4) {
+        nq = 3;
+        ni = 4;
+        nj = 6;
+    } else if (order == 6) {
+        nq = 4;
+        ni = 6;
+        nj = 9;
+    } else if (order == 8) {
+        nq = 5;
+        ni = 8;
+        nj = 12;
+    } else {
+        printf("initSBPFilter: unknown order = %d\n", order);
+    }
+    if (n < 2 * nj) {
+        printf("initSBPFilter: grid is too small for order=%d.  n=%d, nj=%d\n",
+               order, n, nj);
+    }
+
+    double q[8];
+    double a[16][16];
+
+    if (order == 2) {
+        sbp_diss_2_1_coeffs(a, q);
+    } else if (order == 4) {
+        sbp_diss_4_2_coeffs(a, q);
+    } else if (order == 6) {
+        sbp_diss_6_3_coeffs(a, q);
+    } else if (order == 8) {
+        sbp_diss_8_4_coeffs(a, q);
+    } else {
+        printf("initSBPFilter: unknown order=%d\n", order);
+        exit(-1);
+    }
+
+    for (int i = 0; i < nq; i++) {
+        q[i] *= t1;
+    }
+    for (int j = 0; j < nj; j++) {
+        for (int i = 0; i < ni; i++) {
+            a[j][i] *= t1;
+        }
+    }
+
+    dendro_cfd::setArrToZero(A, n * n);
+
+    // LEFT MATRIX EDGE
+    for (int i = 0; i < ni; i++) {
+        for (int j = 0; j < nj; j++) {
+            A[i + n * j] = a[j][i];
+        }
+    }
+
+    // RIGHT MATRIX EDGE
+    for (int i = ni; i < n - ni; i++) {
+        A[i + i * n] = q[0];
+        for (int j = 1; j < nq; j++) {
+            A[i + (i - j) * n] = q[j];
+            A[i + (i + j) * n] = q[j];
+        }
+    }
+
+    // EVERYWHERE ELSE
+    for (int i = n - ni; i < n; i++) {
+        int ii = (n - 1) - i;
+        for (int j = n - nj; j < n; j++) {
+            int jj = (n - 1) - j;
+            A[i + n * j] = a[jj][ii];
+        }
+    }
+}
+

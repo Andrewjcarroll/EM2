@@ -5,9 +5,12 @@
 #include <algorithm>
 #include <bitset>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <map>
 #include <stdexcept>
+#include <tuple>
+#include <vector>
 
 #ifdef EM2_USE_XSMM_MAT_MUL
 #include <libxsmm.h>
@@ -226,6 +229,9 @@ enum FilterType {
     FILT_JT_8,
     FILT_JT_10,
 
+    // SBP Filter Option (derived KO Diss)
+    FILT_SBP_FILTER,
+
     // explicit ko diss
     EXPLCT_KO,
 
@@ -233,8 +239,8 @@ enum FilterType {
 
 // NOTE: BE SURE TO UPDATE THIS IF CHANGING ABOVE!
 static const char *FILT_TYPE_NAMES[] = {
-    "FILT_NONE", "FILT_KO_DISS", "FILT_KIM_6", "FILT_JT_6",
-    "FILT_JT_8", "FILT_JT_10",   "EXPLCT_KO",
+    "FILT_NONE", "FILT_KO_DISS", "FILT_KIM_6",      "FILT_JT_6",
+    "FILT_JT_8", "FILT_JT_10",   "FILT_SBP_FILTER", "EXPLCT_KO",
 };
 
 // NOTE: these are going to be used as global parameters if they're not physical
@@ -446,6 +452,16 @@ class CFDMethod2nd {
 void print_square_mat(double *m, const uint32_t n);
 
 /**
+ * @brief Prints the elements of a non-square matrix.
+ *
+ * @param[in] m Pointer to the first element of the square matrix.
+ * @param[in] n_cols Size of the columns of the matrix
+ * @param[in] n_rows Size of the rows of the matrix
+ */
+void print_nonsquare_mat(double *m, const uint32_t n_cols,
+                         const uint32_t n_rows);
+
+/**
  * @brief Determines what derivative type to use at edges.
  *
  * @param[in] derivtype The "main" derivative type.
@@ -587,17 +603,15 @@ enum CompactDerivValueOrder {
 
 class CompactFiniteDiff {
    private:
-    // STORAGE VARIABLES USED FOR THE DIFFERENT DIMENSIONS
-    // Assume that the blocks are all the same size (to start with)
+// STORAGE VARIABLES USED FOR THE DIFFERENT DIMENSIONS
+// Assume that the blocks are all the same size (to start with)
 
+// Storage for the R matrix operator (combined P and Q matrices in CFD)
+#ifdef SOLVER_ENABLE_MERGED_BLOCKS
+    std::map<uint32_t, std::vector<double *>> m_R_storage;
+#else
     double *m_RMatrices[CompactDerivValueOrder::R_MAT_END] = {};
-
-    // TODO: we're going to want to store the filter and R variables as hash
-    // maps
-    // // Storage for the R matrix operator (combined P and Q matrices in CFD)
-    // std::map<uint32_t, double *> m_R_storage;
-    // // Storage for the RF matrix operator (the filter matrix)
-    // std::map<uint32_t, double *> m_RF_storage;
+#endif
 
     // Temporary storage for operations in progress
     double *m_u1d = nullptr;
@@ -605,6 +619,16 @@ class CompactFiniteDiff {
     // Additional temporary storage for operations in progress
     double *m_du1d = nullptr;
     double *m_du2d = nullptr;
+
+    // pointers for our two workspaces, to potentially be set externally
+    double *m_du3d_block1 = nullptr;
+    double *m_du3d_block2 = nullptr;
+    unsigned int m_max_blk_sz = 0;
+
+    // TODO: make this a parameter!
+    uint16_t m_largest_fusion = 10;
+    // if (m n k)^(1/3) <= this value, then it's a small matrix mult
+    double m_small_mat_threshold = 64.0;
 
     // to check for initialization (not used)
     bool m_initialized_matrices = false;
@@ -625,6 +649,10 @@ class CompactFiniteDiff {
     double m_filt_bound_enable = false;
     double m_kim_filt_kc = 0.88 * M_PI;
     double m_kim_filt_eps = 0.25;
+
+    typedef std::vector<std::tuple<uint32_t, uint32_t>> vec_tuple_int;
+    vec_tuple_int m_matrix_size_pairs;
+    std::vector<uint32_t> m_available_r_sizes;
 
 #ifdef EM2_USE_XSMM_MAT_MUL
     typedef libxsmm_mmfunction<double> kernel_type;
@@ -649,13 +677,22 @@ class CompactFiniteDiff {
 
     void change_dim_size(const unsigned int dim_size);
 
+    void initialize_cfd_3dblock_workspace(const unsigned int max_blk_sz);
+    void delete_cfd_3dblock_workspace();
+
     void initialize_cfd_storage();
-    void initialize_cfd_matrix();
-    void initialize_cfd_filter();
+    void initialize_all_cfd_matrices();
+    void initialize_cfd_matrix(const uint32_t curr_size,
+                               double **outputLocation);
+    void initialize_all_cfd_filters();
+    void initialize_cfd_filter(const uint32_t curr_size,
+                               double **outputLocation);
     void delete_cfd_matrices();
 
     void initialize_cfd_kernels();
     void delete_cfd_kernels();
+
+    void calculate_sizes_that_work();
 
     void set_filter_type(FilterType filter_type) {
         m_filter_type = filter_type;
@@ -664,13 +701,10 @@ class CompactFiniteDiff {
         } else {
             m_beta_filt = 0.0;
         }
-        std::cout << "CFD: Filter Type Set To: " << m_filter_type << std::endl;
     }
 
     void set_deriv_boundary_type(BoundaryType boundary_type) {
         m_deriv_boundary_type = boundary_type;
-        std::cout << "CFD: Deriv Boundary Type set to: " << m_filter_type
-                  << std::endl;
     }
 
     void set_kim_params(double kc, double eps) {
@@ -692,7 +726,6 @@ class CompactFiniteDiff {
                 std::to_string(deriv_type));
         }
         m_deriv_type = deriv_type;
-        std::cout << "CFD: Deriv Type set to: " << m_filter_type << std::endl;
     }
 
     void set_second_deriv_type(const DerType2nd deriv_type) {
@@ -710,9 +743,6 @@ class CompactFiniteDiff {
                 std::to_string(deriv_type));
         }
         m_second_deriv_type = deriv_type;
-
-        std::cout << "CFD: Deriv 2nd Order Boundary Type set to: "
-                  << m_filter_type << std::endl;
     }
 
     /**
@@ -721,7 +751,6 @@ class CompactFiniteDiff {
      */
     void set_padding_size(const unsigned int padding_size) {
         m_padding_size = padding_size;
-        std::cout << "CFD: Padding Size set to: " << m_filter_type << std::endl;
     }
 
     void clear_boundary_padding_nans(double *u, const unsigned int *sz,
@@ -965,3 +994,38 @@ bool initKimDeriv4(double *R, const unsigned int n);
  * @param n The number of rows/cols of the square matrix
  */
 bool initKim_Filter_Deriv4(double *RF, const unsigned int n);
+
+/**
+ * Initializes the coefficients for SBP Dissipation for order 2-1
+ *
+ * @param a A 16x16 matrix that stores the first set or coefficients
+ * @param q A vector that stores the second set of coefficients
+ */
+void sbp_diss_2_1_coeffs(double a[16][16], double q[2]);
+
+/**
+ * Initializes the coefficients for SBP Dissipation for order 4-2
+ *
+ * @param a A 16x16 matrix that stores the first set or coefficients
+ * @param q A vector that stores the second set of coefficients
+ */
+void sbp_diss_4_2_coeffs(double a[16][16], double q[3]);
+
+/**
+ * Initializes the coefficients for SBP Dissipation for order 6-3
+ *
+ * @param a A 16x16 matrix that stores the first set or coefficients
+ * @param q A vector that stores the second set of coefficients
+ */
+void sbp_diss_6_3_coeffs(double a[16][16], double q[4]);
+
+/**
+ * Initializes the coefficients for SBP Dissipation for order 8-4
+ *
+ * @param a A 16x16 matrix that stores the first set or coefficients
+ * @param q A vector that stores the second set of coefficients
+ */
+void sbp_diss_8_4_coeffs(double a[16][16], double q[5]);
+
+void sbp_init_filter(double *A, unsigned int order, unsigned int n);
+
